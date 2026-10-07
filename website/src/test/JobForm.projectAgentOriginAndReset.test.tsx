@@ -69,7 +69,22 @@ afterEach(() => {
   vi.mocked(api.kirocrewAgents).mockClear()
 })
 
-describe('JobForm — project agent origin and reset', () => {
+describe('JobForm — project agent origin and pick retention', () => {
+  it('explains the directory field in plain words and names its button apart from the picker tab', () => {
+    // UX Review (blind read): "I don't know what a "project" is here, and the
+    // hint mentions ".kiro/agents/", which means nothing to me"; and the
+    // field's "Browse" button opened a picker with its own "Browse" tab.
+    mount()
+    expect(
+      screen.getByText(
+        'Folder this job works in. Agents saved in this folder also appear in the Agent list below.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/\.kiro\/agents\//)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Choose folder…' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Browse' })).not.toBeInTheDocument()
+  })
+
   it('marks a project-supplied agent as coming from this project, and only it', async () => {
     vi.mocked(api.kirocrewAgents).mockResolvedValueOnce(projectRoster)
     mount()
@@ -82,16 +97,16 @@ describe('JobForm — project agent origin and reset', () => {
     const listbox = screen.getByRole('listbox')
 
     expect(within(listbox).getByRole('option', { name: /repo-smoke/ })).toHaveTextContent(
-      'project agent',
+      'folder agent',
     )
     // The configured row must NOT carry it -- that is the whole point of keying
     // on scope rather than on the payload the project fetch returned.
     expect(within(listbox).getByRole('option', { name: /default/ })).not.toHaveTextContent(
-      'project agent',
+      'folder agent',
     )
   })
 
-  it('says which agent it cleared when the new folder no longer defines it', async () => {
+  it('keeps the pick when the new folder does not define it', async () => {
     // Folder A supplies `repo-smoke`; folder B supplies only the global.
     vi.mocked(api.kirocrewAgents)
       .mockResolvedValueOnce(projectRoster)
@@ -105,10 +120,11 @@ describe('JobForm — project agent origin and reset', () => {
     )
     fireEvent.click(screen.getByRole('option', { name: /repo-smoke/ }))
 
-    // Move to a folder that does not define it -- the reset fires here.
+    // Move to a folder that does not define it. Whether it resolves there is
+    // Save's call, not the picker's.
     fireEvent.change(screen.getByLabelText('Project directory'), { target: { value: '/repo-b' } })
-
-    const note = await screen.findByTestId('jobform-agent-reset-note')
-    expect(note.textContent).toContain('repo-smoke')
+    await waitFor(() => expect(api.kirocrewAgents).toHaveBeenCalledTimes(2))
+    expect(screen.getByLabelText('Switch agent')).toHaveTextContent('repo-smoke')
+    expect(screen.queryByTestId('jobform-agent-reset-note')).not.toBeInTheDocument()
   })
 })
