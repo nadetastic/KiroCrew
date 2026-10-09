@@ -80,6 +80,9 @@ export interface ChatInputProps {
   busyMode?: ComposerBusyMode
   disabled?: boolean
   placeholder?: string
+  /** Shown instead of the default "Stopping…" while `disabled` is set, naming
+   *  why the composer is locked. */
+  lockedPlaceholder?: string
   prefillHint?: boolean
   onDismissHint?: () => void
   /** macOS-only screenshot */
@@ -493,4 +496,9 @@ export interface ChatInputProps {
    *  never silently lost. When the originating session is still on screen,
    *  ChatInput writes the result itself (undoable) and does NOT call this. */
   onOptimizeResult?: (slotId: string | null, optimized: string) => void
+  /** Told whether an optimize started on the session shown here is still in
+   *  flight. The host uses it to hold back a memory-mode switch, which would
+   *  otherwise carry the pre-optimize text and send the rewrite to the
+   *  session it then deletes. */
+  onOptimizingChange?: (optimizing: boolean) => void
 }
