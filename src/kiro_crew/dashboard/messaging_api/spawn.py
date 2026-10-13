@@ -361,6 +361,13 @@ async def api_spawn(request: web.Request) -> web.Response:
     # on-loop, cache-only agent validation inside spawn() is a hit.
     if agent:
         await warm_project_agents_for_spawn(state, cwd)
+    from kiro_crew.dashboard.session_directive_apply import note_spawner, spawner_attested
+
+    # The spawner is the TRANSPORT-attested caller, never the body's parent_session:
+    # an owner-browser or app-token spawn may name any parent and attests nothing.
+    attested = spawner_attested(caller, parent_session, _slot_for_parent(state, parent_session))
+    if not attested:
+        note_spawner("", parent_session, batch_id, attested=False)
     info = await _spawn_on_loop(
         state,
         task,
@@ -414,6 +421,7 @@ async def api_spawn(request: web.Request) -> web.Response:
             },
             status=400,
         )
+    note_spawner(info.id, parent_session, batch_id, attested=attested)
     resp: dict[str, object] = {
         "id": info.id,
         "task": task,
@@ -572,6 +580,12 @@ async def api_spawn_continue(request: web.Request) -> web.Response:
     # `continue_conversation` is synchronous. Doing it here keeps the gateway
     # responsive even when the recorded path lives on a stalled mount.
     resumed_cwd = await asyncio.to_thread(state.subagents.recorded_cwd, conv_id)
+    from kiro_crew.dashboard.handlers._shared import member_request_scope
+    from kiro_crew.dashboard.session_directive_apply import note_spawner, spawner_attested
+
+    caller = await member_request_scope(request)
+    attested = spawner_attested(caller, parent_session, _slot_for_parent(state, parent_session))
+    note_spawner(conv_id, parent_session, "", attested=False)
     info = await _continue_on_loop(
         state,
         conv_id,
@@ -603,4 +617,5 @@ async def api_spawn_continue(request: web.Request) -> web.Response:
         if info.error.startswith("conversation_gone"):
             return web.json_response({"error": info.error, "code": "conversation_gone"}, status=404)
         return web.json_response({"error": info.error, "code": _SPAWN_REJECTED_CODE}, status=400)
+    note_spawner(info.id, parent_session, "", attested=attested)
     return web.json_response({"id": info.id, "conversation": conv_id, "status": "spawned"})

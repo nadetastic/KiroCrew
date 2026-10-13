@@ -5171,7 +5171,7 @@ agent-writable for every loop, so any loop's `message` can be rewritten
 out-of-band — a pre-existing property of the store, tracked as its own design
 question (#8980), not a property of the self-arm exception.
 **Which turns count as "the session's own":** the directive consumer supplies
-`initiator_slot_key` for exactly two producers, each named explicitly — a turn
+`initiator_slot_key` for exactly three producers, each named explicitly — a turn
 a HUMAN started in this session (`producer_is_user_facing`, the same
 authenticated-human flag the `set_project` / `reset_conversation` gate uses),
 and the delivered wake of a loop bound to this very slot
@@ -5181,9 +5181,28 @@ member's slot is the member keeping itself awake, so the re-arm or
 `monitor_update` it issues from inside that cycle is its own act — the
 conductor pattern (loop expires, the wake turn re-arms). On a crew/member slot
 that wake only exists because the fire-time guard already proved the loop
-self-armed. A cron injection, a sub-agent sharing the slot or an app-driven
-turn carries neither mark; those pass an empty initiator and the crew/member
-refusal stands (visibly, via the notice row). The wake mark is self-arm
+self-armed. The third is the gateway's IDLE digest of sub-agents this session
+spawned itself (`producer_is_own_subagent`, set only by `slack/gateway.py`
+through `_run_chat(_directive_own_subagent=True)`). `POST /api/spawn` and
+`/api/spawn/{id}/continue` record the spawner from the caller's transport
+identity (`member_request_scope`: kernel peer or signed session token, never
+the body's `parent_session`) via `session_directive_apply.note_spawner`, and
+only while the parent slot's CURRENT turn could itself self-arm (`chat_runner`
+stamps `note_turn_self_arm` at each turn's start and clears it at its end:
+user turn, own loop wake, or such a digest). A cron or app turn runs in the
+member's slot with the same attested MCP, so its spawns are not attested. The
+digest qualifies only when `attested_own_subagent` finds that spawner equal to
+the parent AND no unattested spawn (owner browser, app token, ineligible turn)
+used its batch id under ANY parent (the gateway groups a wave by batch id
+alone). The record is memory-only: after a restart each digest is unattested
+and refused. Attested rows past the cap age out oldest first (that run's digest
+fails closed). Once the taint table overflows, attestation latches off until
+restart with a WARNING, so a flood cannot clear a taint and re-trust its wave. The busy-slot queued digest and the recovery
+re-trigger carry no mark. A cron injection, an app-driven turn or an
+unattested sub-agent digest carries none of the three marks; those pass an
+empty initiator and the crew/member refusal stands (visibly, via the notice
+row), reworded on this path to name the turn origin and say to retry in a
+user-sent turn. The wake mark is self-arm
 provenance ONLY — `set_project` / `chat_tag` stay human-only, so a
 wake can never retarget the slot's project. `reset_conversation` admits one wake: a
 conductor's own patrol wake at a round close, under the checks in

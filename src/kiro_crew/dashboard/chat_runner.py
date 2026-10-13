@@ -396,6 +396,7 @@ from kiro_crew.dashboard.session_directive_apply import (  # noqa: F401
     _reset_conversation,
     apply_session_directive,
     apply_session_directive_outcome,
+    note_turn_self_arm,
 )
 from kiro_crew.dashboard.slot_queue_repository import RESTORED_QUEUE_KEY
 from kiro_crew.dashboard.state import (  # noqa: F401
@@ -8475,6 +8476,7 @@ async def _end_turn_tail(
         slot._turn_channel_narrowed = False
         slot._turn_channel_origin = False
         slot._turn_user_sent = False
+        note_turn_self_arm(slot.key, False)
     # A healthy `wait` clears its own state with a final keepalive ping, but
     # that ping is best-effort and cannot run at all if the MCP subprocess died
     # mid-sleep (hard stop, crash, gateway abort). Clearing at turn end is the
@@ -8866,6 +8868,8 @@ async def _run_chat(
     # crew log's whole premise is that a reader takes it as fact. Empty means no
     # dispatch claimed it, which the crew log records as ``user``.
     _turn_actor: str = "",
+    # Set only by the gateway's idle digest of sub-agents this slot itself spawned.
+    _directive_own_subagent: bool = False,
     regenerate_hint: str = "",
     _on_consumed: "Callable[[bool], None] | None" = None,
     _on_irreversibly_consumed: "Callable[[], Awaitable[None] | None] | None" = None,
@@ -8958,6 +8962,10 @@ async def _run_chat(
         slot._turn_channel_narrowed = False
         slot._turn_channel_origin = bool(_directive_channel_origin)
         slot._turn_user_sent = bool(_directive_user_origin) and not _directive_channel_origin
+        # Spawns from this turn are the slot's own only if the turn could self-arm.
+        note_turn_self_arm(
+            slot.key, _directive_user_origin or _directive_self_wake or _directive_own_subagent
+        )
     # Dispatch appends the triggering row before entering this runner. Freeze
     # that row now, before await points, prompt expansion or new deliveries.
     _current_replay_message = _current_message
@@ -13922,6 +13930,8 @@ async def _run_chat(
                             producer_is_self_wake=_directive_self_wake,
                             producer_is_channel=_directive_producer_is_channel(),
                             producer_wake_loop_id=_directive_loop_id,
+                            producer_turn_actor=_turn_actor,
+                            producer_is_own_subagent=_directive_own_subagent,
                         )
                         _applied_one = _applied_outcome.text
                         _record_terminal_directive(
@@ -14138,6 +14148,8 @@ async def _run_chat(
                                 producer_is_self_wake=_directive_self_wake,
                                 producer_is_channel=_directive_producer_is_channel(),
                                 producer_wake_loop_id=_directive_loop_id,
+                                producer_turn_actor=_turn_actor,
+                                producer_is_own_subagent=_directive_own_subagent,
                             )
                             _applied_one = _applied_outcome.text
                             _record_terminal_directive(

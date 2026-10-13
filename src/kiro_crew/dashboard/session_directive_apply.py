@@ -387,6 +387,8 @@ async def apply_session_directive(
     producer_is_self_wake: bool = False,
     producer_is_channel: bool = False,
     producer_wake_loop_id: str = "",
+    producer_turn_actor: str = "",
+    producer_is_own_subagent: bool = False,
 ) -> str:
     """Apply directive *kind*; return the confirmation TEXT only.
 
@@ -405,6 +407,8 @@ async def apply_session_directive(
         producer_is_self_wake=producer_is_self_wake,
         producer_is_channel=producer_is_channel,
         producer_wake_loop_id=producer_wake_loop_id,
+        producer_turn_actor=producer_turn_actor,
+        producer_is_own_subagent=producer_is_own_subagent,
     )
     return outcome.text
 
@@ -431,6 +435,8 @@ async def apply_session_directive_outcome(
     producer_is_self_wake: bool = False,
     producer_is_channel: bool = False,
     producer_wake_loop_id: str = "",
+    producer_turn_actor: str = "",
+    producer_is_own_subagent: bool = False,
 ) -> DirectiveOutcome:
     """Apply directive *kind* with *args* to *slot*/*session_key*; return the
     structured :class:`DirectiveOutcome` (confirmation text for the model plus
@@ -521,8 +527,9 @@ async def apply_session_directive_outcome(
     # NOT the user-surface gate above: ``set_project`` / ``chat_tag`` stay
     # human-only, a wake must never retarget the slot's project, and
     # ``reset_conversation`` admits a wake only through
-    # ``_refuse_unvouched_wake_reset``.
-    self_arm_ok = bool(producer_is_user_facing or producer_is_self_wake)
+    # ``_refuse_unvouched_wake_reset``. Third: an idle digest of sub-agents an
+    # eligible turn of THIS session spawned (:func:`attested_own_subagent`).
+    self_arm_ok = bool(producer_is_user_facing or producer_is_self_wake or producer_is_own_subagent)
     try:
         if producer_is_self_wake and kind in _ARMING_DIRECTIVES:
             _refuse_stale_wake_arm(session_key, producer_wake_loop_id)
@@ -604,19 +611,24 @@ async def apply_session_directive_outcome(
             _audit(session_key, kind, "error")
             return DirectiveOutcome(f"Error: unknown session directive {kind!r}.")
     except _DirectiveDenied as exc:
+        reason = str(exc)
+        if not self_arm_ok and kind in _ARMING_DIRECTIVES | _REVISION_DIRECTIVES:
+            # The directive targets the session that produced it, so an "outside
+            # the session" refusal here was earned by the turn's origin.
+            reason = _origin_arm_refusal(reason, producer_turn_actor)
         _audit(session_key, kind, "denied")
         logger.warning(
             "session-directive DENIED at apply for session_key=%r kind=%r: %s",
             session_key,
             kind,
-            exc,
+            reason,
         )
         if kind in _ARMING_DIRECTIVES:
             _surface_arm_refusal(
                 state,
                 slot,
                 kind,
-                str(exc),
+                reason,
                 session_key=session_key,
                 producer_is_self_wake=producer_is_self_wake,
                 producer_wake_loop_id=producer_wake_loop_id,
@@ -626,7 +638,7 @@ async def apply_session_directive_outcome(
                 state,
                 slot,
                 kind,
-                str(exc),
+                reason,
                 prefix=REVISION_REFUSAL_NOTICE_PREFIX,
                 session_key=session_key,
                 producer_is_self_wake=producer_is_self_wake,
@@ -637,13 +649,13 @@ async def apply_session_directive_outcome(
                 state,
                 slot,
                 kind,
-                str(exc),
+                reason,
                 prefix=STOP_REFUSAL_NOTICE_PREFIX,
                 session_key=session_key,
                 producer_is_self_wake=producer_is_self_wake,
                 producer_wake_loop_id=producer_wake_loop_id,
             )
-        return DirectiveOutcome(str(exc))
+        return DirectiveOutcome(reason)
     except Exception as exc:  # never propagate into the turn loop
         logger.warning("apply_session_directive(%s) failed", kind, exc_info=True)
         _audit(session_key, kind, "error")
@@ -656,6 +668,74 @@ async def apply_session_directive_outcome(
     outcome = _outcome(result)
     _audit(session_key, kind, "error" if outcome.text.startswith("Error:") else "success")
     return outcome
+
+
+# Memory only (a restart forgets them, so every digest fails closed): sub-agent
+# id -> its attested spawner, the (parent, batch) waves an unattested spawn
+# joined, and the slots whose CURRENT turn could self-arm (set by chat_runner).
+_ATTESTED_SPAWNERS: dict[str, str] = {}
+_TAINTED_WAVES: set[str] = set()  # batch ids: the gateway groups a wave by batch id alone
+_TURN_MAY_SELF_ARM: set[str] = set()
+_SPAWNER_CAP = 65536
+_ATTESTATION_OFF = False
+
+
+def note_spawner(agent_id: str, parent: str, batch_id: str, *, attested: bool) -> None:
+    """Record who spawned *agent_id*, from :func:`spawner_attested`, never the body."""
+    global _ATTESTATION_OFF
+    if attested and agent_id and parent:
+        _ATTESTED_SPAWNERS[agent_id] = parent
+    else:
+        _ATTESTED_SPAWNERS.pop(agent_id, None)
+        if batch_id:
+            _TAINTED_WAVES.add(batch_id)
+    if len(_ATTESTED_SPAWNERS) > _SPAWNER_CAP:  # oldest first; a lost one fails closed
+        del _ATTESTED_SPAWNERS[next(iter(_ATTESTED_SPAWNERS))]
+    if len(_TAINTED_WAVES) > _SPAWNER_CAP:
+        # Forgetting a taint would un-taint its wave, so a flood latches every
+        # digest unattested until restart instead (fails closed).
+        logger.warning("sub-agent spawner taints overflowed; digest self-arm is off")
+        _ATTESTATION_OFF = True
+        _TAINTED_WAVES.clear()
+        _ATTESTED_SPAWNERS.clear()
+
+
+def note_turn_self_arm(slot_key: str, eligible: bool) -> None:
+    (_TURN_MAY_SELF_ARM.add if eligible else _TURN_MAY_SELF_ARM.discard)(slot_key)
+
+
+def spawner_attested(scope: Any, parent: str, slot: Any) -> bool:
+    """The transport-attested caller IS *parent* AND its current turn could self-arm:
+    a cron or app turn runs in the member's own slot with the same attested MCP."""
+    eligible = getattr(slot, "key", None) in _TURN_MAY_SELF_ARM
+    return bool(scope.verified and parent and scope.session == parent and eligible)
+
+
+def attested_own_subagent(agent_id: str, parent: str, batch_id: str) -> bool:
+    """Whether *parent* itself spawned *agent_id* and no unattested spawn joined its wave."""
+    taint = _ATTESTATION_OFF or batch_id in _TAINTED_WAVES
+    return bool(parent) and _ATTESTED_SPAWNERS.get(agent_id) == parent and not taint
+
+
+_TURN_ORIGINS = {"subagent": "a sub-agent result", "cron": "a cron job", "app": "an app"}
+
+
+def _origin_arm_refusal(reason: str, turn_actor: str) -> str:
+    """Reword the crew/member outside-arm refusal for a turn that is not the session's own.
+
+    Text only: who may arm (``autonudge_authz.is_self_arm``) is unchanged."""
+    from kiro_crew.autonudge_authz import _EXTERNAL_ARM_REFUSED_MODES, external_arm_refusal
+
+    origin = _TURN_ORIGINS.get(turn_actor, "something other than the user")
+    for mode in sorted(_EXTERNAL_ARM_REFUSED_MODES):
+        reason = reason.replace(
+            external_arm_refusal(mode),
+            f"{mode}-mode sessions can run loops, but only a turn the user sent, this "
+            "session's own loop wake, or results of sub-agents this session spawned may "
+            f"arm one, and this turn was started by {origin}. Ask the user to send the "
+            "request, or retry in a user-sent turn",
+        )
+    return reason
 
 
 # ── autonudge trio ──────────────────────────────────────────────────────────

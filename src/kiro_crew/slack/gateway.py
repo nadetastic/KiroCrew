@@ -10649,6 +10649,10 @@ class GatewayOrchestrator:
                             # delivery that counts has not happened yet.
                             _consumed[0] = consumed
 
+                        from kiro_crew.dashboard.session_directive_apply import (
+                            attested_own_subagent,
+                        )
+
                         _run_kwargs: dict[str, Any] = {}
                         if _owes_delivery:
                             _run_kwargs["_on_consumed"] = _note_consumed
@@ -10667,6 +10671,10 @@ class GatewayOrchestrator:
                                     # SUBAGENT_COMPLETION_KIND, and this branch
                                     # is the same injector dispatching directly.
                                     _turn_actor="subagent",
+                                    # Self-arm provenance (attested spawner only).
+                                    _directive_own_subagent=attested_own_subagent(
+                                        info.id, parent_key, info.batch_id
+                                    ),
                                     **_run_kwargs,
                                 ),
                                 state=self.dashboard_state,
