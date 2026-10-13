@@ -352,7 +352,8 @@
       "send": "보내기",
       "send_message": "메시지 보내기",
       "session_ready_type_a_message_to_start": "세션이 준비되었습니다. 메시지를 입력해 시작하세요.",
-      "streaming": "스트리밍 중"
+      "streaming": "스트리밍 중",
+      "untitled_session_title": "새 세션"
     },
     "chatMessageList": {
       "copied": "복사했습니다!",

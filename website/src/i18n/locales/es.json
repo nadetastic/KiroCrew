@@ -364,7 +364,8 @@
       "send": "Enviar",
       "send_message": "Enviar mensaje",
       "session_ready_type_a_message_to_start": "Sesión lista. Escribe un mensaje para empezar.",
-      "streaming": "en streaming"
+      "streaming": "en streaming",
+      "untitled_session_title": "Nueva sesión"
     },
     "chatMessageList": {
       "copied": "¡Copiado!",

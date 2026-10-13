@@ -111,6 +111,10 @@ import { ChatEmbed } from '@kirocrew/app-sdk'
 <ChatEmbed slotKey="coder-abc123" />
 ```
 
+Unless `frameless` is set, a header strip shows the session's title. A session
+that has no title yet reads "New session" in the user's language; the slot key
+is never shown as text, only as the header's hover tooltip.
+
 The composer accepts multiple lines. `Enter` sends the draft, `Shift+Enter`
 inserts a line break, and an Enter used to commit an input method editor (IME)
 candidate does not send. The box grows with the draft up to 240 pixels, then

@@ -61,7 +61,8 @@
       "send": "Send",
       "send_message": "Send message",
       "session_ready_type_a_message_to_start": "Session ready. Type a message to start.",
-      "streaming": "streaming"
+      "streaming": "streaming",
+      "untitled_session_title": "New session"
     },
     "chatMessageList": {
       "open_path": "Open {{path}}"

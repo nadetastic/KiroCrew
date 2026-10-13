@@ -364,7 +364,8 @@
       "send": "Envoyer",
       "send_message": "Envoyer le message",
       "session_ready_type_a_message_to_start": "Session prête. Saisissez un message pour commencer.",
-      "streaming": "diffusion en cours"
+      "streaming": "diffusion en cours",
+      "untitled_session_title": "Nouvelle session"
     },
     "chatMessageList": {
       "copied": "Copié !",

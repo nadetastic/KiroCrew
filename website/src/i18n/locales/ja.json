@@ -352,7 +352,8 @@
       "send": "送信",
       "send_message": "メッセージを送信",
       "session_ready_type_a_message_to_start": "セッション準備完了。メッセージを入力して開始してください。",
-      "streaming": "ストリーミング中"
+      "streaming": "ストリーミング中",
+      "untitled_session_title": "新しいセッション"
     },
     "chatMessageList": {
       "copied": "コピーしました！",

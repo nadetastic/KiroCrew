@@ -358,7 +358,8 @@
       "send": "পাঠান",
       "send_message": "মেসেজ পাঠান",
       "session_ready_type_a_message_to_start": "সেশন প্রস্তুত। শুরু করতে একটি মেসেজ লিখুন।",
-      "streaming": "স্ট্রিমিং হচ্ছে"
+      "streaming": "স্ট্রিমিং হচ্ছে",
+      "untitled_session_title": "নতুন সেশন"
     },
     "chatMessageList": {
       "copied": "কপি হয়েছে!",

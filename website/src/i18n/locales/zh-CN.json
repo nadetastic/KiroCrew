@@ -352,7 +352,8 @@
       "send": "发送",
       "send_message": "发送消息",
       "session_ready_type_a_message_to_start": "会话已就绪。输入消息即可开始。",
-      "streaming": "流式输出中"
+      "streaming": "流式输出中",
+      "untitled_session_title": "新会话"
     },
     "chatMessageList": {
       "copied": "已复制！",
