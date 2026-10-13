@@ -8316,9 +8316,20 @@ class AcpRuntime:
             payload_snapshot = kas_extras.derived_spec_snapshot
             # Same carriage as create_session: a resumed session re-initializes
             # its servers, and the managed ones must win the same-name contest
-            # on load exactly as they did on new.
+            # on load exactly as they did on new.  ``resume=True`` additionally
+            # hoists user-declared (non-managed) servers: on session/load kiro-cli
+            # re-initialises servers from the session-level array only -- agent-block
+            # declarations are re-registered but not re-launched -- so spec edits
+            # adding new MCP servers would be silently ignored without this.
+            # session/new (create_session) is unchanged: kiro-cli reads agent-block
+            # servers on its own there, and hoist_managed_servers default (False) does
+            # not widen that path.
             kas_agents, mcp_servers = hoist_managed_servers(
-                kas_agents, active_agent, mcp_servers, session_token=stub_token
+                kas_agents,
+                active_agent,
+                mcp_servers,
+                session_token=stub_token,
+                resume=True,
             )
             # REBIND, not just re-assign the param: the hoist changes the array, and
             # wire_servers is what the stall diagnostic and the session report read.
