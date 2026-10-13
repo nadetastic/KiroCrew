@@ -1378,7 +1378,7 @@ rules above apply unchanged. A create link followed while a chat is open lands
 on that chat, never on this rule.
 
 Deleting a crewmate is available on this page: the crewmate's edit controls
-open the shared `CrewEditorDialog` in place, and its Danger pane deletes the
+open `CrewEditorModal` in place, and its Danger pane deletes the
 crewmate. A row the listing rule hides is reached through search, or through
 the Customize page's Crewmates tab.
 
@@ -1729,7 +1729,7 @@ hairline, transparent background, no hover and no pointer; never dashed, which i
 this card's empty / coming-soon language (Sessions empty, Goals) and would make a
 set binding read as not set up — while Workspace keeps the filled clickable-card
 treatment with its hover. Notes, Permissions, and Model follow.
-The pencil, Permissions, and Model entries open the existing `CrewEditorDialog`;
+The pencil, Permissions, and Model entries open `CrewEditorModal`;
 the card introduces no configuration writer. Memory is a non-interactive binding
 readout — it never opens the unrelated generated Dashboard. The Workspace tile's
 label is the crew record's `workspace` field shown as-is: that field is the
