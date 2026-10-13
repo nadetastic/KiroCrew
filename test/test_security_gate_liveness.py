@@ -317,7 +317,41 @@ def _url_payload_command(n: int) -> str:
 #: which now say the match is on the statement's text anywhere on the command line
 #: (heredoc bodies included) and name the file-editing tool for prose that mentions
 #: one. Six lines of catalog text: no pattern, matcher or floor change.
-_PACKAGE_LINE_BUDGET = 29_181
+#:
+#: Raised again, from 29,181, for ``publish_program_word.py``: the git-publish floor
+#: reads program position on quote-aware shell words, so a push run under a program
+#: word the shell resolves at run time (``"$G"``, ``g?t``, a substitution) is found in
+#: every program position -- after newlines, glued and background separators, inside
+#: compound constructs, behind precommands, dispatchers and redirections -- and judged
+#: by its target when its argv is known, and unverifiable when it is not. Substitution
+#: bodies, comments and each heredoc body are read in their own quote context; a body
+#: that only a sink (``git commit``, ``gh pr create``, ``glab mr create``) reads, or that
+#: ``cat``/``tee`` only writes to a plainly named file, is data beside inert companions,
+#: and a markdown ``*`` bullet in a sink's body is read as ``:`` beside inert companions
+#: and plain runners (``make``/``pytest``/``ruff``/``npm test``/``pre-commit run``). A
+#: runtime publish joined to its program word by a backslash-newline is judged on the
+#: folded source, so a sibling feature push cannot hide it. The reading is a
+#: security-deciding predicate, so it cannot leave the package; it sits in its own module
+#: so ``argv_floor`` stays under the per-module cap (the arithmetic-literal fold moved to
+#: ``shell_normalizer``, which also carries the ``flock -c`` command-string payload the
+#: nested-payload walk judges). No threshold moved.
+#:
+#: Raised to 31,467 so a markdown bullet in a ``gh``/``glab`` body is text beside a
+#: checkout, switch, stash, plain rebase or script run by its path (neither runs a
+#: hook on a body), so ``mkdir`` and ``.github`` paths leave a file-written body data,
+#: and so a redirection target ends at the next operator and a literal ``git`` with a
+#: redirection before ``push`` is judged by its target. No threshold moved.
+#:
+#: Raised to 31,546 so a ``${...}`` parameter expansion holding whitespace stays one
+#: shell word for the program-word reader, so a markdown bullet in a body only
+#: written to a plainly named file is text beside a plain runner, so a ``.sh`` script
+#: run by its path is a hookless sibling like a ``.py`` one, so a target-neutral flag
+#: may carry its one-word value attached, so ``push`` glued to a letter is not read as
+#: the subcommand, so a ``>|`` noclobber redirection is one operator and not a pipe,
+#: and so a body written to an executable a sibling then runs is command text
+#: (``argv_floor`` comments were tightened to keep it under the per-module cap). No
+#: threshold moved.
+_PACKAGE_LINE_BUDGET = 31_546
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
