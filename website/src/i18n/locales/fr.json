@@ -430,7 +430,9 @@
       "send": "Envoyer",
       "send_message": "Envoyer le message",
       "session_ready_type_a_message_to_start": "Session prête. Saisissez un message pour commencer.",
-      "streaming": "diffusion en cours"
+      "streaming": "diffusion en cours",
+      "stop_restarts_session": "Arrêter redémarrera cette session : l’historique du chat reste, mais le travail en cours et les messages en file d’attente sont abandonnés.",
+      "stop_did_not_go_through": "Cet arrêt n’a pas abouti."
     },
     "chatMessageList": {
       "copied": "Copié !",

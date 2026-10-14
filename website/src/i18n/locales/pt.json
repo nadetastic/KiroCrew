@@ -430,7 +430,9 @@
       "send": "Enviar",
       "send_message": "Enviar mensagem",
       "session_ready_type_a_message_to_start": "Sessão pronta. Digite uma mensagem para começar.",
-      "streaming": "em streaming"
+      "streaming": "em streaming",
+      "stop_restarts_session": "Parar vai reiniciar esta sessão: o histórico do chat fica, mas o trabalho em andamento e as mensagens na fila são descartados.",
+      "stop_did_not_go_through": "Essa parada não foi concluída."
     },
     "chatMessageList": {
       "copied": "Copiado!",

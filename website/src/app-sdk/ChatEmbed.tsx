@@ -33,7 +33,9 @@ import FollowUpBar from '../components/FollowUpBar'
 import ChatFooter from '../pages/chat/ChatFooter'
 import { deriveFollowUpOptions } from './protocol'
 import { useComposerDraft } from './useComposerDraft'
-import { useEmbedStop, EmbedStopButton, type EmbedStopState } from './useEmbedStop'
+import { useEmbedStop, type EmbedStopState } from './useEmbedStop'
+import { StopControls } from '../components/chat-input/StopControls'
+import { useStopEscapeHatch } from '../hooks/useStopEscapeHatch'
 import { useAppApi, useAppInfo } from './index'
 import { appApiSendWire } from './appSendWire'
 import { sendTurn, mintSendId } from '../chat-core/transport/sendTurn'
@@ -144,6 +146,12 @@ interface ChatSlotData {
   stopping?: boolean
   /** The stop machine's phase; drives Stop's escalation. */
   stop_state?: EmbedStopState
+  /** A Stop was declined for a compaction moments ago: the next press resets the session. */
+  stop_declined?: boolean
+  /** The running (or last ended) turn's number; absent before a turn is numbered. */
+  turn?: number
+  /** The gateway process's generation; with `turn`, names one turn across restarts. */
+  turn_gen?: string
   title?: string
   /** Older rows exist beyond the bounded page. */
   has_more?: boolean
@@ -676,10 +684,26 @@ function ChatEmbed({
   // Stop sits where Send does while a turn runs and the draft is empty (a
   // draft mid-turn still sends, which queues it), as in the main composer.
   const refetchNow = useCallback(() => { void refetch() }, [refetch])
-  const { stopState, onStop, stopError } = useEmbedStop({
-    api, slotKey, running, serverStopState: shown?.stop_state, onSettled: refetchNow,
+  const serverTurn = typeof shown?.turn === 'number' ? `${shown.turn_gen ?? ''}:${shown.turn}` : undefined
+  const { stopState, onStop, stopError, stopDeclined } = useEmbedStop({
+    api, slotKey, running, serverTurn, serverStopState: shown?.stop_state, serverStopDeclined: shown?.stop_declined, onSettled: refetchNow,
   })
   const showStop = running && !draft.trim()
+  // Says what Stop does now, not "again": the warning also shows to a reader
+  // who opened or returned to the embed after someone else's press.
+  const stopResetHint = (
+    <span className="text-[13px] leading-4 text-muted" data-testid="chat-embed-stop-hint">
+      {i18nT('appSdk.chatEmbed.stop_restarts_session')}
+    </span>
+  )
+  const { escaped: killingEscaped } = useStopEscapeHatch(stopState)
+  // One status while a stop is under way: the header says "Stopping" with the
+  // footer, instead of "streaming". The placeholder stays neutral, so a narrow
+  // embed does not say it three times.
+  const stopUnderWay = running && (stopState !== 'idle' || !!shown?.stopping)
+  // The footer says "Killing…" once the force stop runs; the header and the
+  // placeholder follow it rather than keep saying "Stopping…".
+  const stopLabel = stopState === 'killing' ? i18nT('components.chatInput.killing') : i18nT('components.chatInput.stopping')
 
   // Resolve a pending tool approval from inside the embed.
   //
@@ -752,7 +776,7 @@ function ChatEmbed({
           <span className={`w-2 h-2 rounded-full shrink-0 ${running ? 'bg-ok animate-pulse' : 'bg-accent'}`} />
           <span className="text-[13px] font-semibold text-text-strong truncate flex-1">{title || slotKey}</span>
           {agent && <span className="text-[10px] font-mono text-muted">{agent}</span>}
-          {running && <span className="text-[10px] text-ok font-mono">{i18nT('appSdk.chatEmbed.streaming')}</span>}
+          {running && <span className={`text-[10px] font-mono ${stopUnderWay ? 'text-danger' : 'text-ok'}`}>{stopUnderWay ? stopLabel : i18nT('appSdk.chatEmbed.streaming')}</span>}
         </div>
       )}
 
@@ -842,15 +866,47 @@ function ChatEmbed({
         </div>
       )}
 
-      {(stopError || stopState === 'soft_pending') && (
+      {/* The press hints describe the Stop button, so they show only while it
+          is on screen; typing a draft swaps it for Send, which queues. */}
+      {(stopError || (showStop && (stopDeclined || stopState === 'soft_pending' || (stopState === 'killing' && killingEscaped)))) && (
         <div className={`shrink-0 px-3 pt-2 ${frameless ? '' : 'bg-bg-accent'}`}>
           {stopError ? (
-            <ErrorNotice testId="chat-embed-stop-error" message={stopError} />
+            showStop && stopDeclined ? (
+              <>
+                {/* A failed press leaves the backend's reset hatch armed, so the
+                    next press still resets. The failure is said without its own
+                    "press Stop again", so one instruction remains: the reset's. */}
+                {/* No hand-off: the embed's composer draft is unsaved local state that the hand-off's navigation to the main chat would discard. */}
+                <ErrorNotice testId="chat-embed-stop-error" message={i18nT('appSdk.chatEmbed.stop_did_not_go_through')} />
+                <div className="pt-1">{stopResetHint}</div>
+              </>
+            ) : (
+              // No hand-off: the embed's composer draft is unsaved local state that the hand-off's navigation to the main chat would discard.
+              <ErrorNotice testId="chat-embed-stop-error" message={stopError} />
+            )
+          ) : stopDeclined ? (
+            // The last press was declined (the session is compacting) and
+            // nothing is stopping; the next press restarts the session.
+            stopResetHint
+          ) : stopState === 'killing' ? (
+            // An instruction, not a status line: the same press re-sends the force stop.
+            <span className="text-[13px] leading-4 text-muted" data-testid="chat-embed-stop-hint">
+              <span className="text-text">{i18nT('components.chatInput.click_again_to_force_stop')}</span>
+              {' · '}
+              {i18nT('components.chatInput.taking_longer_than_expected')}
+            </span>
           ) : (
-            <span className="text-xs text-muted" data-testid="chat-embed-stop-hint">{i18nT('components.chatInput.click_again_to_force_stop')}</span>
+            // The cost sits beside the instruction, where the user decides,
+            // not only in the button's tooltip: force stop drops queued work.
+            <span className="text-[13px] leading-4 text-muted" data-testid="chat-embed-stop-hint">
+              <span className="text-text">{i18nT('components.chatInput.click_again_to_force_stop')}</span>
+              {' · '}
+              {i18nT('components.chatInput.force_kill_discards_in_progress_work_and_queued')}
+            </span>
           )}
         </div>
       )}
+
       <Composer slotKey={slotKey} value={draft} onChange={setDraft} capabilities={EMBED_CAPABILITIES}>
         <div className={`flex items-end gap-2 px-3 py-2 shrink-0 ${frameless ? '' : 'border-t border-border bg-bg-accent'}`}>
           <ComposerEditor
@@ -864,7 +920,10 @@ function ChatEmbed({
             disabled={sendMutation.isPending}
           />
           {showStop ? (
-            <EmbedStopButton stopState={stopState} onStop={onStop} />
+            // The main composer's own Stop control; its hints are drawn above the
+            // composer instead of beside the button, where a narrow embed has no
+            // room for them.
+            <StopControls stopState={stopState} killingEscaped={killingEscaped} stopWithTap={onStop} inlineHints={false} guideTarget={false} />
           ) : (
             <ComposerSend
               className="p-2 min-h-0 rounded-md disabled:opacity-40"
