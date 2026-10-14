@@ -67,6 +67,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 
 import Modal from '../../components/Modal'
 import CrewAvatar, { type CrewAvatarOverride } from '../../components/CrewAvatar'
+import { seedIconPose, seedIconBg } from '../../lib/avatarPoses'
 import CrewAvatarBuilder from '../../components/CrewAvatarBuilder'
 import SimpleSelect from '../../components/SimpleSelect'
 import ErrorNotice from '../../components/ErrorNotice'
@@ -104,6 +105,16 @@ const BLANK_LOOK_SEED = 'crewmate'
 /** The name-derived face a look falls back to until the user picks one. */
 function lookSeed(name: string): string {
   return name.trim() || BLANK_LOOK_SEED
+}
+
+/** The avatar a new mate gets when the user never picks one: an ICON (a shipped
+ *  pose over a solid background), never the trait ghost a missing avatar falls
+ *  back to. Pose AND colour are seeded from the name — so the preview updates
+ *  as the user types and the stored value matches it — and both stay
+ *  re-pickable in the builder afterward. */
+function defaultLookFor(name: string): CrewAvatarOverride {
+  const seed = lookSeed(name)
+  return { kind: 'icon', pose: seedIconPose(seed), bg: seedIconBg(seed) }
 }
 
 /** The id the Advanced settings row's `aria-controls` points at. */
@@ -332,7 +343,8 @@ export default function NewCrewmateDialog({
   const reduceMotion = useReducedMotion()
 
   const [name, setName] = useState('')
-  // The look the user picked in the avatar editor; null = the name's own face.
+  // The look the user picked in the avatar editor; null = fall back to the
+  // name-seeded DEFAULT ICON (see defaultLookFor), never the trait ghost.
   const [look, setLook] = useState<CrewAvatarOverride | null>(null)
   const [lookOpen, setLookOpen] = useState(false)
   const [builtFrom, setBuiltFrom] = useState('')
@@ -477,6 +489,10 @@ export default function NewCrewmateDialog({
     n === DEFAULT_CREWMATE_TEMPLATE ? t('pages.membersPage.built_from_default', { agent: n }) : n,
   )
   const builtFromValue = builtFrom || DEFAULT_CREWMATE_TEMPLATE
+  // The look shown and stored when the user has not picked one: a name-seeded
+  // icon (pose + colour both follow the name). Never null, so the create flow
+  // never shows or stores the trait ghost a missing avatar falls back to.
+  const effectiveLook = look ?? defaultLookFor(name)
   const workspaceOptions = useMemo(
     () => workspacesData?.workspaces?.map((w: { name: string }) => w.name) || ['default'],
     [workspacesData],
@@ -809,7 +825,7 @@ export default function NewCrewmateDialog({
       triggers,
       session_color: sessionColor,
       ...(model !== INHERIT_MODEL ? { model } : {}),
-      ...(look ? { avatar: look } : {}),
+      avatar: effectiveLook,
       ...(firstGreeting ? { first_greeting: true as const } : {}),
     })
   }
@@ -842,7 +858,7 @@ export default function NewCrewmateDialog({
         <div className="flex flex-col items-center gap-2" data-testid="crewmate-create-identity">
           <LookTile
             seed={lookSeed(name)}
-            avatar={look}
+            avatar={effectiveLook}
             onEdit={() => setLookOpen(true)}
             label={t('components.avatarBuilder.edit_avatar')}
             disabled={busy}
