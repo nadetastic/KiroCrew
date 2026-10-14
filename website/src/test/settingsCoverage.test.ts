@@ -240,7 +240,7 @@ const WAIVED_BARE_CONTROLS: Record<string, { counts: BareCounts; reason: string 
     reason: 'add-a-custom-sound form (name + per-tone number fields) — creates an entry, not a persistent setting',
   },
   'McpManagement.tsx': {
-    counts: { Switch: 2 },
+    counts: { Switch: 1 },
     reason: 'Developer-page-only surface, deliberately outside settings search',
   },
   'MobileLoginCard.tsx': {
