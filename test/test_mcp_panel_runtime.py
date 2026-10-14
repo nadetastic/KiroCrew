@@ -544,16 +544,23 @@ class TestDashboardWriteClear:
 
         assert mock_post.call_args[0][1] == {"field": "asks", "value": {}}
 
-    def test_clear_on_a_string_field_is_refused_before_the_gateway(self) -> None:
+    def test_clear_on_a_scalar_field_falls_through_to_the_gateway(self) -> None:
+        """A scalar field gets ``[]`` and the gateway's own refusal, not an early one.
+
+        The gateway records the ``wrong_type`` refusal in the mistake book; an early
+        refusal here would duplicate it and bypass the book. Fold-sourced fields follow
+        the same path and receive ``field_not_agentic`` from the route.
+        """
         string_fields = {"fields": [{"field": "headline", "type": "string", "source": "agentic"}]}
+        gateway_reply = {"error": "headline wants string, and this value is array."}
         with (
             patch("kiro_crew.mcp_panel._get", return_value=string_fields),
-            patch("kiro_crew.mcp_panel._post") as mock_post,
+            patch("kiro_crew.mcp_panel._post", return_value=gateway_reply) as mock_post,
         ):
             out = _call_tool("dashboard_write", {"field": "headline", "clear": True})
 
-        assert out.startswith("Error:") and "string" in out and "clear: true" in out, out
-        mock_post.assert_not_called()
+        assert out.startswith("Error:") and "wants string" in out, out
+        assert mock_post.call_args[0][1] == {"field": "headline", "value": []}, mock_post.call_args
 
     def test_clear_on_an_unknown_field_posts_an_empty_list_for_the_route_to_refuse(
         self,

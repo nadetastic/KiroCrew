@@ -1016,10 +1016,11 @@ def _render_fields(payload: dict[str, Any]) -> str:
 def _empty_value_for(field: str, sk: str) -> "tuple[Any, str]":
     """The value ``clear: true`` writes to *field*, or a refusal to return instead.
 
-    Returns the empty value of the field's declared type, from the field list the
-    ``dashboard_fields`` tool reads, so the type is the one the write route checks
-    against. A field the list does not name gets ``[]``, and the write route answers
-    it with its own unknown-field refusal, the same as any other write.
+    Returns ``{}`` for object fields and ``[]`` for everything else (array fields,
+    unknown fields, and scalar or fold-sourced fields). Non-object cases fall through
+    to the write route: it records a ``wrong_type`` refusal in the mistake book for
+    agentic scalar fields, and refuses fold-sourced fields with ``field_not_agentic``.
+    An early refusal here would duplicate the gateway's answer and bypass the book.
     """
     d = _get("/api/agent-panel/dashboard/fields", session_key=sk)
     if d.get("error"):
@@ -1036,14 +1037,14 @@ def _empty_value_for(field: str, sk: str) -> "tuple[Any, str]":
     if row is None:
         return [], ""
     declared = row.get("type")
-    if declared == "array":
-        return [], ""
     if declared == "object":
         return {}, ""
-    return None, (
-        f"Error: clear: true empties an array or object field, and `{field}` is a "
-        f"{declared} field; write its new value instead"
-    )
+    # Every other case -- array, string, number, boolean, fold-sourced fields --
+    # falls through to the gateway. Array gets []; the gateway type-checks it and
+    # records the refusal in the mistake book if it is wrong. Fold-sourced fields
+    # are refused with field_not_agentic. An early refusal here would duplicate
+    # the gateway's own wrong_type answer and bypass the mistake book.
+    return [], ""
 
 
 def _call_tool(name: str, raw_args: dict[str, Any]) -> str:
