@@ -176,6 +176,7 @@ interface SessionRowActions {
   onRenameStart: (key: string, scope: string, title: string, fromMenu: boolean) => void
   onRenameChange: (value: string) => void
   onRenameCommit: (key: string, value: string) => void
+  slotRenameEnterRef: React.MutableRefObject<boolean>
   onRenameCancel: () => void
   /** The row menu's "Regenerate title": re-derives the title from the
    *  conversation without making the session active. */
