@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import AgentDropdownList, { DefaultAgentRow, ManageAgentsFooter , defaultWriteFailureOf } from '../components/AgentDropdownList'
 import type { AgentItem } from '../components/AgentDropdownList'
@@ -183,13 +183,21 @@ describe('AgentDropdownList hosts own the scroll (#6375)', () => {
   // unbounded with no failing test.
   // vitest's cwd is website/ (the vitest config root), and import.meta.url is
   // not file-scheme under its transform, so resolve from cwd instead.
+  const pages = join(process.cwd(), 'src', 'pages')
+  const ownerDir = join(pages, 'chat', 'page')
+  // ChatPage composes owners under pages/chat/page/ (and its useChatPage* siblings), so the ChatPage row reads the page and those owners.
+  const chatPageSource = () => [
+    readFileSync(join(pages, 'ChatPage.tsx'), 'utf8'),
+    ...readdirSync(ownerDir).filter(f => /\.tsx?$/.test(f) && !/\.test\./.test(f)).sort().map(f => readFileSync(join(ownerDir, f), 'utf8')),
+    ...readdirSync(pages).filter(f => /^useChatPage\w*\.ts$/.test(f)).sort().map(f => readFileSync(join(pages, f), 'utf8')),
+  ].join('\n')
   const hosts = [
-    ['ChatPage', join(process.cwd(), 'src', 'pages', 'ChatPage.tsx')],
-    ['ChatPane', join(process.cwd(), 'src', 'components', 'ChatPane.tsx')],
+    ['ChatPage', chatPageSource],
+    ['ChatPane', () => readFileSync(join(process.cwd(), 'src', 'components', 'ChatPane.tsx'), 'utf8')],
   ] as const
 
-  it.each(hosts)('%s wraps the list in a scroll-owning listbox', (_name, file) => {
-    const src = readFileSync(file, 'utf8')
+  it.each(hosts)('%s wraps the list in a scroll-owning listbox', (_name, read) => {
+    const src = read()
     const sites = [...src.matchAll(/<AgentDropdownList[\s>]/g)]
     expect(sites.length).toBeGreaterThan(0)
     for (const site of sites) {

@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { effortToCarry, filterInteractiveModels, legacyCodexEffort, normalizeHiddenModels, shouldSeparateModelEffort, switchGroupedModel, useModelPickerConfigured, useModelPickerHiddenModelsQuery } from '../hooks/useInteractiveModels'
@@ -249,7 +249,13 @@ describe('interactive model visibility', () => {
 
   it('is wired only into ChatPage and ChatPane consumers', () => {
     const root = resolve(process.cwd(), 'src')
-    const chatPage = readFileSync(resolve(root, 'pages/ChatPage.tsx'), 'utf8')
+    // ChatPage composes owners under pages/chat/page/ (and its useChatPage* siblings), so the pins read the page and those owners.
+    const ownerDir = resolve(root, 'pages/chat/page')
+    const chatPage = [
+      readFileSync(resolve(root, 'pages/ChatPage.tsx'), 'utf8'),
+      ...readdirSync(ownerDir).filter(f => /\.tsx?$/.test(f) && !/\.test\./.test(f)).sort().map(f => readFileSync(resolve(ownerDir, f), 'utf8')),
+      ...readdirSync(resolve(root, 'pages')).filter(f => /^useChatPage\w*\.ts$/.test(f)).sort().map(f => readFileSync(resolve(root, 'pages', f), 'utf8')),
+    ].join('\n')
     const chatPane = readFileSync(resolve(root, 'components/ChatPane.tsx'), 'utf8')
     const bulkSwitcher = readFileSync(resolve(root, 'pages/ChatSidebar.tsx'), 'utf8')
     const settings = readFileSync(resolve(root, 'pages/settings/ChatPanel.tsx'), 'utf8')
