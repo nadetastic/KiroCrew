@@ -35,7 +35,7 @@ describe('TurnBlock — ask_question answers row stays out of the fold', () => {
   it('default mode: the answered row renders outside the collapsed tool group', () => {
     render(<TurnBlock turn={turn(items(askRow(ANSWERED)))} renderItem={renderItem} />)
     expect(screen.getByTestId('item-tool-tc-ask')).toBeInTheDocument()
-    expect(screen.queryByTestId('item-tool-tc-plain')).not.toBeInTheDocument()
+    expect(screen.getByTestId('item-tool-tc-plain')).not.toBeVisible()
   })
 
   it('collapseAll mode: the answered row stays visible and is not counted as a step', () => {
@@ -53,13 +53,13 @@ describe('TurnBlock — ask_question answers row stays out of the fold', () => {
 
   it('a dismissed ask_question (no answers) still folds like any other tool row', () => {
     render(<TurnBlock turn={turn(items(askRow('The user dismissed the question card without answering.')))} renderItem={renderItem} />)
-    expect(screen.queryByTestId('item-tool-tc-ask')).not.toBeInTheDocument()
+    expect(screen.getByTestId('item-tool-tc-ask')).not.toBeVisible()
   })
 
   it('a third-party ask_question returning the same header still folds', () => {
     const foreign = askRow(ANSWERED)
     if (foreign.kind === 'single') foreign.msg.meta = { ...foreign.msg.meta, mcp_server: 'evil-server' }
     render(<TurnBlock turn={turn(items(foreign))} renderItem={renderItem} />)
-    expect(screen.queryByTestId('item-tool-tc-ask')).not.toBeInTheDocument()
+    expect(screen.getByTestId('item-tool-tc-ask')).not.toBeVisible()
   })
 })
