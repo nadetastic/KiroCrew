@@ -186,7 +186,9 @@ from kiro_crew.dashboard.chat_turn.directives import (  # noqa: F401
 from kiro_crew.dashboard.chat_turn.file_changes import (  # noqa: F401
     _PATH_TRUNCATION_MARKER,
     _apply_turn_snapshot_budget,
+    _budgeted_opcodes,
     _classify_str_replace_before,
+    _drop_failed_write,
     _excerpt_pair,
     _line_change_input,
     _note_reply_row,
@@ -2069,9 +2071,14 @@ _MAX_TURN_FULL_CONTENT_CHARS = 2 * _MAX_RECONSTRUCT_BYTES
 # Unchanged lines ``_excerpt_pair`` shows around each changed run of a windowed
 # large-file diff. Runs closer than twice this share one window.
 _EXCERPT_CONTEXT_LINES = 20
+# Work ``_excerpt_pair``'s line diff may do, in line-occurrence visits
+# (``_budgeted_opcodes``). Repeated lines make that diff superlinear; past this
+# the windows are given up and the top cut is kept. About half a second of CPU.
+_EXCERPT_DIFF_BUDGET = 4_000_000
 
 # Chars of path+before+after one TURN's file_changes may carry across every
-# entry EXCEPT its protected one -- the most recent entry whose content differs,
+# entry EXCEPT its protected one -- the most recent entry whose content differs
+# or, truncated, may differ,
 # which ``_apply_turn_snapshot_budget`` keeps whole and never charges here.
 # ``_MAX_SNAPSHOT`` bounds one file; without a turn bound a single turn that
 # rewrites a dozen large files still attaches megabytes to one message, and
@@ -13681,6 +13688,14 @@ async def _run_chat(
                         result_digest=event.tool_output_digest,
                         result_bytes=event.tool_output_bytes,
                     )
+                    # A write that failed or was refused changed nothing; its
+                    # snapshot must not show an edit (_drop_failed_write). Only
+                    # an id that still names one call may drop: a collapsed id
+                    # would also match another call's successful write.
+                    if _tool_status in ("failed", "refused") and _tcid_identifies:
+                        _drop_failed_write(
+                            slot, _tcid_identity_key(getattr(event, "tool_call_id", None))
+                        )
                 # MCP Apps (flag-independent on this side): if gatewayd spooled a
                 # UI payload it injected an opaque marker into the result text.
                 # Load it, push an mcp_app_render event to this slot, and strip

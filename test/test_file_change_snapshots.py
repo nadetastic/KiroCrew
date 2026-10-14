@@ -2053,7 +2053,9 @@ class TestOmittedSnapshotFiles:
         ) in snapshots
         assert _MAX_TURN_SNAPSHOT_CHARS == 2 * _MAX_SNAPSHOT
         assert (
-            "protects the most recent one whose content actually differs without charging it; "
+            "protects the most recent one whose content differs, or is truncated and so may "
+            "differ past its cut, without charging it (a one-file turn therefore never shows "
+            "the turn-budget notice); "
             f"the total character bound is therefore {_MAX_TURN_SNAPSHOT_CHARS:,} plus that "
             "entry's two snapshot sides, truncation markers and path."
         ) in snapshots
@@ -2398,7 +2400,11 @@ class TestPendingStrReplaceThroughTheTurnLoop:
         assert "pending_str_replace" not in entry
 
     @pytest.mark.asyncio
-    async def test_refused_result_keeps_the_fragment(self, short_tmp_dir: Path):
+    @pytest.mark.parametrize("status", ["refused", "failed"])
+    async def test_a_write_that_did_not_run_records_no_change(self, short_tmp_dir: Path, status):
+        # A failed or refused write left the file as it was. Its fragment before
+        # ("value = 1" against the whole file) would show an edit that never
+        # happened, so the turn records no change for it.
         f = short_tmp_dir / "cfg"
         f.write_text(self.AFTER)
         record = await _snapshot_turn(
@@ -2415,14 +2421,15 @@ class TestPendingStrReplaceThroughTheTurnLoop:
             AcpEvent(
                 kind=EVENT_TOOL_RESULT,
                 tool_call_id="call-sr",
-                tool_output="refused",
-                tool_status="refused",
+                tool_output=status,
+                tool_status=status,
             ),
             *_LANDS,
         )
         assert record.stop_reason == STOP_REASON_END_TURN
-        entry = self._file_change(record)
-        assert entry["before"] == self.PARAMS["oldStr"]
+        assert not any(
+            (row.get("meta") or {}).get("file_changes") for row in record.rows("assistant")
+        )
 
 
 # ── a small edit past the per-file cut of a large file ─────────────────────
@@ -2531,10 +2538,12 @@ class TestLargeFileEditPastTheCut:
         slot._file_changes = []
         _record_turn_snapshot(slot, _snapshot_write_target({"command": "insert", "path": str(f)}))
         _flush_with_reads(slot)
-        (entry,) = slot.messages[-1]["meta"]["file_changes"]
-        # No change: no window, and two top cuts exceed the turn budget, so the
-        # entry is demoted exactly as before.
-        assert entry["truncated"] and entry["content_omitted"]
+        meta = slot.messages[-1]["meta"]
+        (entry,) = meta["file_changes"]
+        # No window, so the top cut and its flag. Truncated MAY differ, so the
+        # one entry stays protected: no "too large" notice on a one-file turn.
+        assert entry["truncated"] and not entry.get("content_omitted")
+        assert "file_changes_omitted_files" not in meta
 
     def test_change_larger_than_the_cap_keeps_the_top_cut(self, short_tmp_dir: Path):
         f = short_tmp_dir / "big.py"
@@ -2697,10 +2706,11 @@ class TestLargeFileEditShapes:
         self, short_tmp_dir: Path, status
     ):
         # The reviewer's repro on the auto-approve path: the disk already holds
-        # the after when the dashboard reads it. Whatever the tool reports, the
-        # only before left is a reverse substitution, which a concurrent restore
-        # of the captured bytes would make false, so the entry keeps the top cut
-        # (a known limit; a pre-write snapshot would lift it).
+        # the after when the dashboard reads it. The only before left is a
+        # reverse substitution, which a concurrent restore of the captured bytes
+        # would make false, so a completed edit keeps the top cut (a known
+        # limit; a pre-write snapshot would lift it), protected as the one entry
+        # that may differ. A failed or refused one changed nothing: no entry.
         f = short_tmp_dir / "big.py"
         lines = _large_source().splitlines(keepends=True)
         old, new = lines[18000], lines[18000] + "added line\n"
@@ -2730,8 +2740,12 @@ class TestLargeFileEditShapes:
             ),
             *_LANDS,
         )
-        (entry,) = _persisted_meta(record, "done")["file_changes"]
-        assert entry["truncated"]
+        meta = _persisted_meta(record, "done")
+        if status != "completed":
+            assert "file_changes" not in meta
+            return
+        (entry,) = meta["file_changes"]
+        assert entry["truncated"] and not entry.get("content_omitted")
         assert "lines not shown)" not in (entry["before"] + entry["after"])
 
 
@@ -2870,3 +2884,291 @@ class TestLargeFileEditRedaction:
         text = "".join(self._pem(5)) + "token = AKIAIOSFODNN7EXAMPLE\n"
         once = redact_text(text)
         assert redact_text(once) == once
+
+
+# ── follow-up: bounded line diff, failed writes, one-file protection ───────
+
+
+def _repeated_rows(lines: int = 40_000, period: int = 200) -> list[str]:
+    """About 1.3 MB of rows that each repeat ``lines / period`` times.
+
+    Logs, CSVs and fixture data look like this: no row is rare, and none is
+    common enough (1%) for difflib's autojunk to skip it, so a whole-file line
+    diff is superlinear on it.
+    """
+    return [f"row {i % period:05d},alpha,beta,gamma,delta\n" for i in range(lines)]
+
+
+class _DiffWork:
+    """Counts the line visits ``SequenceMatcher.find_longest_match`` is asked for.
+
+    Deterministic stand-in for time: each call walks every line of its ``a``
+    range against each place that line occurs in ``b``. Past ``ceiling`` it
+    raises, so an unbounded diff fails in milliseconds instead of hanging.
+    """
+
+    def __init__(self, monkeypatch, ceiling: int = 50_000_000) -> None:
+        import difflib
+
+        self.visits = 0
+        real = difflib.SequenceMatcher.find_longest_match
+        work = self
+
+        def counted(matcher, alo=0, ahi=None, blo=0, bhi=None):
+            ahi = len(matcher.a) if ahi is None else ahi
+            occurs = matcher.b2j
+            work.visits += sum(len(occurs.get(line, ())) for line in matcher.a[alo:ahi])
+            if work.visits > ceiling:
+                raise AssertionError(f"line diff passed {ceiling} visits")
+            return real(matcher, alo, ahi, blo, bhi)
+
+        monkeypatch.setattr(difflib.SequenceMatcher, "find_longest_match", counted)
+
+
+class TestExcerptDiffWork:
+    """``_excerpt_pair`` diffs only what differs, and gives up past its budget."""
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            pytest.param(lambda rows: rows.__setitem__(30_000, "edited\n"), id="one-line"),
+            pytest.param(
+                lambda rows: rows.__setitem__(slice(25_000, 25_000), ["x\n"] * 3), id="insert"
+            ),
+            pytest.param(lambda rows: rows.__delitem__(slice(25_000, 25_003)), id="delete"),
+            pytest.param(lambda rows: rows.append("tail\n"), id="append-at-end"),
+        ],
+    )
+    def test_a_small_edit_in_repeated_rows_diffs_only_the_changed_lines(self, monkeypatch, edit):
+        from kiro_crew.dashboard.chat_runner import _excerpt_pair
+
+        rows = _repeated_rows()
+        before = "".join(rows)
+        edit(rows)
+        work = _DiffWork(monkeypatch)
+        pair = _excerpt_pair(before, "".join(rows))
+        assert pair is not None and pair[0] != pair[1]
+        # Untrimmed, the first match alone visits ~40,000 lines x 200 places.
+        assert work.visits < 10_000
+        assert max(len(pair[0]), len(pair[1])) <= _MAX_SNAPSHOT
+
+    def test_many_spread_edits_stop_at_the_budget(self, monkeypatch):
+        import kiro_crew.dashboard.chat_runner as cr
+
+        rows = _repeated_rows()
+        before = "".join(rows)
+        for i in range(0, len(rows), 50):
+            rows[i] = f"changed {i}\n"
+        work = _DiffWork(monkeypatch)
+        assert cr._excerpt_pair(before, "".join(rows)) is None
+        # The charge is taken before each call's walk, so the walk never runs
+        # past the budget: what was visited is at most the budget itself.
+        assert work.visits <= cr._EXCERPT_DIFF_BUDGET
+
+    def test_two_far_edits_in_distinct_lines_still_window(self, monkeypatch):
+        from kiro_crew.dashboard.chat_runner import _excerpt_pair
+
+        lines = _large_source().splitlines(keepends=True)
+        before = "".join(lines)
+        lines[1_000], lines[19_000] = "edit A\n", "edit B\n"
+        work = _DiffWork(monkeypatch)
+        pair = _excerpt_pair(before, "".join(lines))
+        assert pair is not None
+        assert _changed_lines(*pair) == (2, 2)
+        assert work.visits < 100_000
+
+    def test_a_length_gap_past_the_cap_skips_the_diff(self, monkeypatch):
+        from kiro_crew.dashboard.chat_runner import _excerpt_pair
+
+        work = _DiffWork(monkeypatch, ceiling=0)
+        assert _excerpt_pair("a\n", "a\n" + "b" * (_MAX_SNAPSHOT + 1)) is None
+        assert work.visits == 0
+
+    def test_over_budget_edit_keeps_the_top_cut_and_stays_protected(
+        self, short_tmp_dir: Path, monkeypatch
+    ):
+        import kiro_crew.dashboard.chat_runner as cr
+
+        monkeypatch.setattr(cr, "_EXCERPT_DIFF_BUDGET", 0)
+        f = short_tmp_dir / "big.py"
+        text = _large_source()
+        f.write_text(text)
+        old, new, edited = TestLargeFileEditPastTheCut._edit(text)
+        slot = _make_slot_with_assistant_message()
+        slot._file_changes = []
+        _record_turn_snapshot(
+            slot,
+            _snapshot_write_target(
+                {"command": "strReplace", "path": str(f), "oldStr": old, "newStr": new}
+            ),
+        )
+        f.write_text(edited)
+        _flush_with_reads(slot)
+        meta = slot.messages[-1]["meta"]
+        (entry,) = meta["file_changes"]
+        assert entry["truncated"] and not entry.get("content_omitted")
+        assert "file_changes_omitted_files" not in meta
+
+
+class TestOneFileTurnKeepsItsEntry:
+    """A truncated entry may differ past its cut, so it can be the protected one."""
+
+    def test_equal_top_cuts_on_a_truncated_entry_are_protected(self) -> None:
+        cut = "x" * _MAX_SNAPSHOT
+        entries = [{"path": "/big.log", "before": cut, "after": cut, "truncated": True}]
+        kept, demoted, dropped = _apply_turn_snapshot_budget(entries)
+        assert (demoted, dropped) == (0, 0)
+        assert kept[0]["before"] == cut and not kept[0].get("content_omitted")
+
+    def test_inline_flush_of_a_large_edit_is_protected(self, short_tmp_dir: Path):
+        # The cancel and error exits flush without off-loop reads, so no window.
+        f = short_tmp_dir / "big.py"
+        text = _large_source()
+        f.write_text(text)
+        old, new, edited = TestLargeFileEditPastTheCut._edit(text)
+        slot = _make_slot_with_assistant_message()
+        slot._file_changes = []
+        _record_turn_snapshot(
+            slot,
+            _snapshot_write_target(
+                {"command": "strReplace", "path": str(f), "oldStr": old, "newStr": new}
+            ),
+        )
+        f.write_text(edited)
+        _flush_file_changes(slot)
+        meta = slot.messages[-1]["meta"]
+        (entry,) = meta["file_changes"]
+        assert entry["truncated"] and not entry.get("content_omitted")
+        assert "file_changes_omitted_files" not in meta
+
+    def test_edit_in_a_file_past_the_whole_read_bound_is_protected(
+        self, short_tmp_dir: Path, monkeypatch
+    ):
+        import kiro_crew.dashboard.chat_runner as cr
+
+        f = short_tmp_dir / "big.py"
+        text = _large_source()
+        monkeypatch.setattr(cr, "_MAX_RECONSTRUCT_BYTES", len(text) // 2)
+        f.write_text(text)
+        slot = _make_slot_with_assistant_message()
+        slot._file_changes = []
+        snapshot = _snapshot_write_target({"command": "insert", "path": str(f)})
+        assert "full_content" not in snapshot
+        _record_turn_snapshot(slot, snapshot)
+        f.write_text(text + "appended\n")
+        _flush_with_reads(slot)
+        meta = slot.messages[-1]["meta"]
+        (entry,) = meta["file_changes"]
+        assert entry["truncated"] and not entry.get("content_omitted")
+        assert "file_changes_omitted_files" not in meta
+
+
+def _str_replace_call(call_id: str, path: Path, old: str, new: str) -> AcpEvent:
+    return AcpEvent(
+        kind=EVENT_TOOL_CALL,
+        tool_call_id=call_id,
+        tool_name="fs_write",
+        tool_kind="edit",
+        title="Write",
+        raw_tool_params={"command": "strReplace", "path": str(path), "oldStr": old, "newStr": new},
+        diff_old_text=old,
+        diff_path=str(path),
+    )
+
+
+def _result(call_id: str, status: str) -> AcpEvent:
+    return AcpEvent(
+        kind=EVENT_TOOL_RESULT,
+        tool_call_id=call_id,
+        tool_output=status,
+        tool_status=status,
+        tool_final=status == "completed",
+    )
+
+
+class TestFailedWriteRecordsNoChange:
+    """A write tool that failed or was refused never shows an edit."""
+
+    # An earlier turn already applied this edit: the disk holds newStr once and
+    # no oldStr, so the snapshot is the reverse substitution, a whole before.
+    DISK = "head\nvalue = 2\ntail\n"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["failed", "refused"])
+    async def test_reissued_edit_that_was_refused_shows_nothing(self, short_tmp_dir, status):
+        f = short_tmp_dir / "cfg"
+        f.write_text(self.DISK)
+        record = await _snapshot_turn(
+            _str_replace_call("call-1", f, "value = 1", "value = 2"),
+            _result("call-1", status),
+            *_LANDS,
+        )
+        assert "file_changes" not in _persisted_meta(record, "done")
+
+    @pytest.mark.asyncio
+    async def test_the_same_edit_completing_still_shows_its_diff(self, short_tmp_dir):
+        f = short_tmp_dir / "cfg"
+        f.write_text(self.DISK)
+        record = await _snapshot_turn(
+            _str_replace_call("call-1", f, "value = 1", "value = 2"),
+            _result("call-1", "completed"),
+            *_LANDS,
+        )
+        (entry,) = _persisted_meta(record, "done")["file_changes"]
+        assert (entry["before"], entry["after"]) == ("head\nvalue = 1\ntail\n", self.DISK)
+
+    @pytest.mark.asyncio
+    async def test_a_retry_after_a_failure_keeps_its_own_before(self, short_tmp_dir):
+        # The failed call's entry is gone before the retry records, so the
+        # retry's own (true) before is the one kept.
+        f = short_tmp_dir / "cfg"
+        f.write_text("head\nvalue = 3\ntail\n")
+        record = await _snapshot_turn(
+            _str_replace_call("call-1", f, "value = 2", "value = 3"),
+            _result("call-1", "failed"),
+            _str_replace_call("call-2", f, "value = 5", "value = 3"),
+            _result("call-2", "completed"),
+            *_LANDS,
+        )
+        (entry,) = _persisted_meta(record, "done")["file_changes"]
+        assert entry["before"] == "head\nvalue = 5\ntail\n"
+
+    @pytest.mark.asyncio
+    async def test_a_failure_on_a_path_another_call_wrote_keeps_the_entry(self, short_tmp_dir):
+        f = short_tmp_dir / "cfg"
+        f.write_text("head\nvalue = 2\ntail\n")
+        record = await _snapshot_turn(
+            _str_replace_call("call-1", f, "value = 1", "value = 2"),
+            _result("call-1", "completed"),
+            _str_replace_call("call-2", f, "value = 9", "value = 2"),
+            _result("call-2", "failed"),
+            *_LANDS,
+        )
+        (entry,) = _persisted_meta(record, "done")["file_changes"]
+        assert entry["before"] == "head\nvalue = 1\ntail\n"
+
+    @pytest.mark.asyncio
+    async def test_a_failure_under_a_collapsed_id_keeps_another_calls_change(self, short_tmp_dir):
+        # Both ids are credential-shaped, so redaction turns them into one
+        # constant and one identity key. The failed call cannot be told from the
+        # successful one, so nothing is dropped.
+        good, bad = short_tmp_dir / "good", short_tmp_dir / "bad"
+        good.write_text(self.DISK)
+        bad.write_text("x\n")
+        record = await _snapshot_turn(
+            _str_replace_call("AKIAIOSFODNN7EXAMPLE", good, "value = 1", "value = 2"),
+            _result("AKIAIOSFODNN7EXAMPLE", "completed"),
+            _str_replace_call("AKIAI44QH8DHBEXAMPLE", bad, "y", "z"),
+            _result("AKIAI44QH8DHBEXAMPLE", "failed"),
+            *_LANDS,
+        )
+        changes = _persisted_meta(record, "done")["file_changes"]
+        assert any(c["path"].endswith("good") for c in changes)
+
+    def test_an_unknown_writer_drops_nothing(self) -> None:
+        from kiro_crew.dashboard.chat_runner import _drop_failed_write
+
+        slot = MagicMock()
+        slot._file_changes = [{"path": "/a", "content": "x"}]
+        _drop_failed_write(slot, "")
+        assert slot._file_changes == [{"path": "/a", "content": "x"}]

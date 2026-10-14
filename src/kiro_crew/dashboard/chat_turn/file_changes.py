@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import stat as stat_module
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:
     from kiro_crew.dashboard.chat_runner import (
         _EXCERPT_CONTEXT_LINES,
+        _EXCERPT_DIFF_BUDGET,
         _MAX_RECONSTRUCT_BYTES,
         _MAX_SLOT_MESSAGES,
         _MAX_SNAPSHOT,
@@ -102,6 +104,46 @@ def _safe_read_file_text(path: str, *, whole: bool) -> _Snapshot | None:
         return None
 
 
+def _budgeted_opcodes(
+    a: list[str], b: list[str], budget: int
+) -> Sequence[tuple[str, int, int, int, int]] | None:
+    """``SequenceMatcher(None, a, b).get_opcodes()``, or None past ``budget``.
+
+    ``find_longest_match`` walks, for each line of its ``a`` range, every place
+    that line occurs in ``b``. On a file of repeated rows (a log, a CSV, fixture
+    data) no line is rare enough for autojunk and too common to be skipped, so
+    the walk grows with lines times repeats, and many changes repeat it per
+    block: a 1.3 MB file with one line in fifty changed took minutes. Each call
+    is charged that walk's upper bound before it runs; once the total passes
+    ``budget`` the diff stops and returns None. The charge is computed in one
+    pass over the range, never more than the walk itself costs.
+    """
+    import difflib
+
+    class _OverBudget(Exception):
+        pass
+
+    class _Matcher(difflib.SequenceMatcher):
+        spent = 0
+
+        def find_longest_match(
+            self, alo: int = 0, ahi: int | None = None, blo: int = 0, bhi: int | None = None
+        ) -> difflib.Match:
+            # ``a`` and ``b2j`` are set by ``set_seqs``; the stubs do not declare them.
+            seqs: Any = self
+            ahi = len(seqs.a) if ahi is None else ahi
+            occurs = seqs.b2j
+            self.spent += (ahi - alo) + sum(len(occurs.get(line, ())) for line in seqs.a[alo:ahi])
+            if self.spent > budget:
+                raise _OverBudget
+            return super().find_longest_match(alo, ahi, blo, bhi)
+
+    try:
+        return _Matcher(None, a, b).get_opcodes()
+    except _OverBudget:
+        return None
+
+
 def _excerpt_pair(before: str, after: str) -> tuple[str, str] | None:
     """Cut both whole sides to windows around each change, or None if they won't fit.
 
@@ -114,23 +156,40 @@ def _excerpt_pair(before: str, after: str) -> tuple[str, str] | None:
     are equal on both sides, so the windowed diff shows exactly the lines the
     turn changed and counts them correctly.
 
-    Returns None when the sides are identical or a side would exceed
-    ``_MAX_SNAPSHOT``; the caller then keeps the top cut and the truncated flag.
-    Runs off the event loop (``_read_turn_afters``): the line diff is linear-ish
-    on the near-identical sides a turn produces, but over up to two megabytes.
+    Returns None when the sides are identical, a side would exceed
+    ``_MAX_SNAPSHOT``, or the line diff passes ``_EXCERPT_DIFF_BUDGET``; the
+    caller then keeps the top cut and the truncated flag. Runs off the event
+    loop (``_read_turn_afters``), over up to two megabytes per side. The lines
+    both sides share at the top and bottom are set aside before the diff, so a
+    turn's usual one or two nearby edits diff only the lines between them.
     """
-    import difflib
-
     if before == after:
         return None
+    # The longer side holds at least the length gap in changed text, so its
+    # window cannot fit; no diff needed to know.
+    if abs(len(before) - len(after)) > _MAX_SNAPSHOT:
+        return None
     a, b = before.splitlines(keepends=True), after.splitlines(keepends=True)
+    shortest = min(len(a), len(b))
+    head = 0
+    while head < shortest and a[head] == b[head]:
+        head += 1
+    tail = 0
+    while tail < shortest - head and a[-1 - tail] == b[-1 - tail]:
+        tail += 1
+    opcodes = _budgeted_opcodes(
+        a[head : len(a) - tail], b[head : len(b) - tail], _EXCERPT_DIFF_BUDGET
+    )
+    if opcodes is None:
+        return None
     ctx = _EXCERPT_CONTEXT_LINES
     # Changed runs as [a_start, a_end, b_start, b_end]; a gap of at most two
     # contexts joins the run to the one before it.
     runs: list[list[int]] = []
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b).get_opcodes():
+    for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
             continue
+        i1, i2, j1, j2 = i1 + head, i2 + head, j1 + head, j2 + head
         if runs and i1 - runs[-1][1] <= 2 * ctx:
             runs[-1][1], runs[-1][3] = i2, j2
         else:
@@ -314,8 +373,8 @@ def _resolve_pending_str_replace(pending: dict[str, Any], after: str) -> _Snapsh
     ``if_post_write``, the snapshot content. The classifier only defers an
     undecidable edit, whose two hypotheses differ
     (``if_post_write != if_pre_write``), so an unchanged file fails the
-    ``after == if_pre_write`` test and keeps the fragment on its own, with no
-    completion gate needed for that case.
+    ``after == if_pre_write`` test and is never settled here; the runner then
+    drops the failed call's entry altogether (``_drop_failed_write``).
 
     The cases content-only resolution would get WRONG are turn-end states this
     slot cannot attribute to the single tracked edit, and each is removed
@@ -510,7 +569,7 @@ def _apply_turn_snapshot_budget(
     that builds entries directly still gets newest-last semantics.
 
     One entry is protected from the budget: the most recent one whose content
-    actually differs. A protected slot spent on an idempotent write -- a
+    differs or may differ (a truncated side hides what lies past it). A protected slot spent on an idempotent write -- a
     format-on-save whose before equals its after, which this flush deliberately
     keeps -- would drop the turn's only real diff to store a diff of nothing. The
     protected entry is kept whole and is NOT charged: the budget governs the
@@ -549,8 +608,15 @@ def _apply_turn_snapshot_budget(
     # The protected entry is kept whole and stays outside the budget: charging
     # it would let one entry at the per-file cap consume the whole budget by
     # itself and demote a second file of ANY size. It counts toward the row cap.
+    # A truncated entry MAY differ: two equal top cuts say nothing about the text
+    # past them, so an edit there (no windows: a cancel, a file over the whole-read
+    # bound, windows that would not fit) still counts as a change.
     protected_index = next(
-        (i for i in by_recency if entries[i].get("before") != entries[i].get("after")),
+        (
+            i
+            for i in by_recency
+            if entries[i].get("truncated") or entries[i].get("before") != entries[i].get("after")
+        ),
         None,
     )
     kept_chars = 0
@@ -638,10 +704,10 @@ def _record_turn_snapshot(
             # A second writer to this path makes a deferred before unsafe:
             # drop the pending hypothesis unless this write and the held entry
             # share one known id, so the flush falls back to the fragment.
-            if held.get("pending_str_replace") is not None and (
-                not writer_key or held.get("writer_key") != writer_key
-            ):
+            if not writer_key or held.get("writer_key") != writer_key:
                 held.pop("pending_str_replace", None)
+                # Two writers, or an unknown one: a failure of either cannot void it.
+                held.pop("writer_key", None)
             slot._file_changes.append(slot._file_changes.pop(index))
             break
     else:
@@ -668,6 +734,26 @@ def _record_turn_snapshot(
             if total > _MAX_TURN_FULL_CONTENT_CHARS:
                 holder.pop(name)
                 total -= size
+
+
+def _drop_failed_write(slot: "_ChatSlot", writer_key: str) -> None:
+    """Forget the entry a write tool that failed or was refused recorded alone.
+
+    A failed write changed nothing, but its snapshot can still read as a change:
+    a strReplace re-issued after an earlier turn applied it is refused, and the
+    file, holding ``newStr`` once, classifies as already written, so the reverse
+    substitution becomes a whole-file before and the card shows a ``-old/+new``
+    hunk that never happened; an unresolved one keeps the edit's fragment as its
+    before. Content cannot tell that file from a fresh success. The tool's own
+    terminal status can, so an entry whose every write came from this one call
+    is removed and the turn records no change for it. An entry another writer
+    also touched keeps its first before (``_record_turn_snapshot`` cleared its
+    ``writer_key``), because a later write may have changed the file.
+    """
+    changes = getattr(slot, "_file_changes", None)
+    if not writer_key or not isinstance(changes, list):
+        return
+    changes[:] = [held for held in changes if held.get("writer_key") != writer_key]
 
 
 def _read_turn_afters(
