@@ -2458,3 +2458,49 @@ class TestHoistAgentServersForResume:
         projected = to_client_custom_agent("kirocrew", spec, "p")
         _, array = hoist_managed_servers([projected], "kirocrew", [], resume=True)
         assert [e["name"] for e in array] == ["a-server", "z-server"]
+
+    def test_non_managed_server_stays_untokened_when_session_token_is_set(self):
+        # A user-declared server hoisted via resume=True carries no session
+        # credential: the token is for Crew's own managed servers only.
+        from kiro_crew.mcp_gateway.claim import STUB_SESSION_TOKEN_ENV
+
+        projected = self._projected()
+        _, array = hoist_managed_servers(
+            [projected], "kirocrew", [], session_token="tok-x", resume=True
+        )
+        assert len(array) == 1
+        assert array[0]["name"] == "my-server"
+        env_names = [pair["name"] for pair in array[0].get("env", [])]
+        assert STUB_SESSION_TOKEN_ENV not in env_names
+
+    def test_managed_server_still_gets_token_on_resume(self, monkeypatch):
+        # resume=True combined with a session_token: managed servers receive
+        # the token; user-declared servers do not.
+        import kiro_crew.agent as agent_mod
+        from kiro_crew.mcp_gateway.claim import STUB_SESSION_TOKEN_ENV
+
+        monkeypatch.setattr(
+            agent_mod,
+            "managed_mcp_spec_entry",
+            lambda name, *, include_opt_in=False: {"command": "/opt/kc", "args": []},
+        )
+        monkeypatch.setattr(agent_mod, "_managed_mcp_env", lambda: {"KIROCREW_HOME": "/m"})
+        spec = _spec(
+            mcpServers={
+                "kirocrew-core": {"command": "kc"},
+                "my-server": {"command": "my-mcp", "args": ["serve"]},
+            },
+            tools=["@kirocrew-core", "@my-server/tool_a"],
+        )
+        projected = to_client_custom_agent("kirocrew", spec, "p")
+        _, array = hoist_managed_servers(
+            [projected], "kirocrew", [], session_token="tok-x", resume=True
+        )
+        by_name = {e["name"]: e for e in array}
+        assert set(by_name) == {"kirocrew-core", "my-server"}
+        core_env = {pair["name"]: pair["value"] for pair in by_name["kirocrew-core"]["env"]}
+        assert (
+            core_env.get(STUB_SESSION_TOKEN_ENV) == "tok-x"
+        ), "managed server receives the session token on resume"
+        user_env_names = [pair["name"] for pair in by_name["my-server"].get("env", [])]
+        assert STUB_SESSION_TOKEN_ENV not in user_env_names, "user-declared server stays untokened"
