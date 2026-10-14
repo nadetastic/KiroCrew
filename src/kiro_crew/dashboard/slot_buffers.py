@@ -39,6 +39,14 @@ MAX_DEFERRED_NOTE_CHARS = 4000
 # copy of a 200-acknowledged note.
 _MAX_DURABLE_HOLD_ENTRIES = 2 * MAX_DEFERRED_NOTES
 
+# Eject a held note after this many consecutive flush failures within
+# one gateway lifetime (the counter is in-memory only; it resets on
+# restart) to prevent a deterministically-failing note from blocking
+# every slot seam forever. Each ejection writes a visible error row;
+# if the row write itself fails the durable entry is kept so a restart
+# can retry rather than silently dropping the note.
+_MAX_FLUSH_ATTEMPTS = 3
+
 # The source label's single bound, defined here and imported by the writer in
 # chat_handlers the way ``MAX_DEFERRED_NOTE_CHARS`` already is, so the admit
 # bound and the restore bound cannot drift. The label is the AUTHENTICATED
@@ -740,8 +748,11 @@ class SlotBufferCoordinator:
         flush/save/enqueue interleaving is. A note dropped at the rebind
         seam records its id in ``slot._dropped_note_ids`` instead, and the
         next save retires it from there. A crash before the save re-delivers
-        the note on restore: at-least-once, the correct failure direction for
-        a delivery promise.
+        the note on restore: at-least-once within
+        :data:`_MAX_FLUSH_ATTEMPTS` failures per gateway lifetime.
+        A note that exceeds the budget is ejected via a visible error
+        row; if the row write fails the durable entry is kept for a
+        restart retry rather than being silently dropped.
         """
         if not slot._deferred_notes:
             return 0
@@ -778,8 +789,9 @@ class SlotBufferCoordinator:
                     slot._dropped_note_ids.add(dropped_id)
                 continue
 
-            # Pop is a retry marker: if the visible row fails after the context
-            # was queued, the restored note must not enqueue that context twice.
+            # Pop context as a retry-idempotency marker. The except arm below
+            # restores it when ``slot.append`` raises, ensuring context is never
+            # promoted into ``_pending_context`` without its visible row.
             context = note.pop("context", None)
             note_id = note.get("id")
             row_meta: dict[str, Any] = {"noteSession": live_session}
@@ -793,12 +805,91 @@ class SlotBufferCoordinator:
             if isinstance(note_id, str) and note_id:
                 # The delivered row carries its note id, and the full save
                 # retires a durable entry exactly when the window it writes
-                # contains that id — row and retirement land in one atomic
+                # contains that id -- row and retirement land in one atomic
                 # file write, whatever the flush/save interleaving was.
                 row_meta["noteId"] = note_id
+            # Try the visible row. The eject counter lives in the except arm so
+            # a transient failure does not prevent a later attempt that could
+            # succeed from delivering the note.
+            _ejected = False
             try:
-                if context is not None:
-                    context["noteSession"] = live_session
+                # Visible row first: context is never promoted before the row
+                # that gives it meaning lands, so a raise here cannot leave an
+                # orphaned context entry in the pending queue.
+                slot.append(
+                    role="inject",
+                    content=note["content"],
+                    cls=note["cls"],
+                    broadcast=True,
+                    meta=row_meta,
+                )
+            except Exception:
+                # Increment the counter on failure only. Eject after
+                # _MAX_FLUSH_ATTEMPTS failures so a transient fault does not
+                # preempt a retry that would succeed.
+                note["_flush_attempts"] = note.get("_flush_attempts", 0) + 1
+                if note["_flush_attempts"] > _MAX_FLUSH_ATTEMPTS:
+                    dropped_id = note_id
+                    _note_content = note.get("content", "")
+                    _excerpt = _note_content[:120] + ("..." if len(_note_content) > 120 else "")
+                    _eject_written = False
+                    try:
+                        slot.append(
+                            role="error",
+                            content=(
+                                "\u26a0 Your note couldn't be delivered and was discarded. "
+                                f'Resend it if still needed: "{_excerpt}"'
+                            ),
+                            cls="msg msg-err",
+                            broadcast=True,
+                        )
+                        _eject_written = True
+                    except Exception:
+                        logger.warning(
+                            "Slot %s: failed to write eject-row for a stuck held note; "
+                            "durable entry kept for restart retry; content: %r",
+                            slot.key,
+                            _excerpt,
+                            exc_info=True,
+                        )
+                    if _eject_written:
+                        # Notice landed: retire the durable entry and audit.
+                        if isinstance(dropped_id, str) and dropped_id:
+                            slot._dropped_note_ids.add(dropped_id)
+                        sel().log_api_access(
+                            caller="dashboard",
+                            operation="note_flush",
+                            outcome="dropped",
+                            source="max_flush_attempts",
+                            resources=f"slot={slot.key}",
+                            error=(
+                                f"note {dropped_id!r} ejected after "
+                                f"{note['_flush_attempts']} flush failures"
+                            ),
+                        )
+                    # Whether or not the notice landed, do not restore: a note
+                    # that exceeded its budget is done. If the notice failed,
+                    # the durable entry survives for a restart retry.
+                    _ejected = True
+                else:
+                    # Row failed within budget. Restore context so the retry
+                    # can promote it after the row eventually lands.
+                    if context is not None:
+                        note["context"] = context
+                    # New arrivals stay after this older, unwritten suffix.
+                    slot._deferred_notes[:0] = held[index:]
+                    raise
+
+            if _ejected:
+                continue
+
+            # Row landed; now promote the context half. A failure here is
+            # non-fatal: the visible row is already written and is not replayed,
+            # so the context is dropped with a warning rather than retried
+            # (which would duplicate the row).
+            if context is not None:
+                context["noteSession"] = live_session
+                try:
                     if not slot.append_pending_context(context):
                         # The pop above already retired the retry marker. The
                         # warning is the loss signal; the normal full-queue case
@@ -810,21 +901,12 @@ class SlotBufferCoordinator:
                             "the pending-context queue had no seat",
                             slot.key,
                         )
-                slot.append(
-                    role="inject",
-                    content=note["content"],
-                    cls=note["cls"],
-                    broadcast=True,
-                    meta=row_meta,
-                )
-            except Exception:
-                # New arrivals stay after this older, unwritten suffix. The
-                # durable copy still holds every note (delivered rows
-                # included) and the next full save trues it up against live
-                # state; see the docstring for why no metadata write happens
-                # here.
-                slot._deferred_notes[:0] = held[index:]
-                raise
+                except Exception:
+                    logger.warning(
+                        "Slot %s: context add raised after note row landed; context dropped",
+                        slot.key,
+                        exc_info=True,
+                    )
             written += 1
         return written
 

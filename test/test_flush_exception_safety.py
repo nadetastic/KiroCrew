@@ -31,6 +31,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_app, _make_state
 
 from kiro_crew.dashboard import chat_runner
+from kiro_crew.dashboard.slot_buffers import _MAX_FLUSH_ATTEMPTS
 from kiro_crew.dashboard.state import _ChatSlot
 
 
@@ -120,11 +121,12 @@ class TestPartialFlushKeepsUnwrittenNotes:
         assert slot._deferred_notes == []
 
     def test_a_restored_note_does_not_re_promote_its_context_half(self, tmp_path: Path):
-        """The context half is promoted before the visible line is appended.
+        """Context is promoted AFTER the visible row lands, not before.
 
-        So a note whose ``append`` raised has ALREADY put its context on the
-        pending queue. Restoring the note for a retry must not queue that
-        context a second time, or the next turn reads the note twice.
+        With the fix, a note whose ``append`` raised has NOT yet put its context
+        on the pending queue -- the restore arm puts context back in the note so
+        the retry can promote it after the row eventually lands.  The retry must
+        not queue the context a second time either.
         """
         slot = _slot()
         _hold(slot, "first", "second")
@@ -133,17 +135,115 @@ class TestPartialFlushKeepsUnwrittenNotes:
 
         def _append(self, role="", content="", cls="", **kw):
             if content == "second":
-                raise _Boom("append failed after its context was promoted")
+                raise _Boom("append failed before context could be promoted")
             return real_append(self, role=role, content=content, cls=cls, **kw)
 
         with patch.object(type(slot), "append", _append):
             with pytest.raises(_Boom):
                 slot.flush_deferred_notes()
 
-        assert [e["content"] for e in slot._pending_context] == ["first", "second"]
+        # "second" row failed -- its context must NOT be in the queue yet.
+        assert [e["content"] for e in slot._pending_context] == ["first"]
         slot.flush_deferred_notes()
-        # "second" must appear exactly once, not twice.
+        # After the retry the row lands and context is promoted exactly once.
         assert [e["content"] for e in slot._pending_context] == ["first", "second"]
+
+
+# ---------------------------------------------------------------------------
+# Finding 2 -- retry bound
+# ---------------------------------------------------------------------------
+
+
+class TestFlushRetryBound:
+    def test_a_deterministically_failing_note_is_ejected_after_max_attempts(self, tmp_path: Path):
+        """A note whose append always raises is ejected rather than queued forever.
+
+        After ``_MAX_FLUSH_ATTEMPTS`` failures the note is dropped, an error row
+        is written so the author can see what happened, and the note's id is
+        recorded in ``_dropped_note_ids`` so the durable entry is retired on the
+        next save rather than replaying after a restart.
+        """
+        slot = _slot()
+        note_id = "test-note-id-eject"
+        slot._deferred_notes.append(
+            {
+                "content": "always fails",
+                "cls": "reconcile-note",
+                "session": None,
+                "context": {"content": "always fails"},
+                "id": note_id,
+            }
+        )
+
+        real_append = type(slot).append
+
+        def _always_failing_append(self, role="", content="", cls="", **kw):
+            if role == "inject":
+                raise _Boom("always fails")
+            return real_append(self, role=role, content=content, cls=cls, **kw)
+
+        with patch.object(type(slot), "append", _always_failing_append):
+            for _ in range(_MAX_FLUSH_ATTEMPTS):
+                with pytest.raises(_Boom):
+                    slot.flush_deferred_notes()
+            # One more flush: this one should eject instead of raise.
+            written = slot.flush_deferred_notes()
+
+        assert written == 0, "an ejected note contributes 0 to the written count"
+        assert slot._deferred_notes == [], "ejected note must not remain in the queue"
+        assert note_id in slot._dropped_note_ids, "durable entry must be retired"
+        error_rows = [m for m in slot.messages if m.get("role") == "error"]
+        assert len(error_rows) == 1, "exactly one error row must appear"
+        assert "discarded" in error_rows[0]["content"], "error row must mention the discard"
+
+    def test_ejected_note_does_not_block_notes_behind_it(self, tmp_path: Path):
+        """After ejection the flush continues with remaining held notes."""
+        slot = _slot()
+        slot._deferred_notes.append(
+            {
+                "content": "always fails",
+                "cls": "reconcile-note",
+                "session": None,
+                "context": None,
+                "id": "failing-id",
+                # Pre-saturate: one more failure should eject it.
+                "_flush_attempts": _MAX_FLUSH_ATTEMPTS,
+            }
+        )
+        _hold(slot, "good note", with_context=False)
+
+        real_append = type(slot).append
+
+        def _fail_for_stuck(self, role="", content="", cls="", **kw):
+            if role == "inject" and content == "always fails":
+                raise _Boom("stuck note fails once more, triggering eject")
+            return real_append(self, role=role, content=content, cls=cls, **kw)
+
+        with patch.object(type(slot), "append", _fail_for_stuck):
+            slot.flush_deferred_notes()
+
+        assert [m["content"] for m in slot.messages if m.get("role") == "inject"] == [
+            "good note"
+        ], "the note behind the ejected one must be delivered"
+        assert slot._deferred_notes == []
+
+    def test_attempt_counter_survives_partial_flush_cycle(self, tmp_path: Path):
+        """Each failure increments the counter so the budget is cumulative."""
+        slot = _slot()
+        _hold(slot, "stuck")
+
+        real_append = type(slot).append
+
+        def _fail_inject(self, role="", content="", cls="", **kw):
+            if role == "inject":
+                raise _Boom("stuck")
+            return real_append(self, role=role, content=content, cls=cls, **kw)
+
+        with patch.object(type(slot), "append", _fail_inject):
+            for expected_count in range(1, _MAX_FLUSH_ATTEMPTS + 1):
+                with pytest.raises(_Boom):
+                    slot.flush_deferred_notes()
+                assert slot._deferred_notes[0].get("_flush_attempts") == expected_count
 
 
 # ---------------------------------------------------------------------------
