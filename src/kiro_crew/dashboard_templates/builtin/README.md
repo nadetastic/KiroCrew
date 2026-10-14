@@ -83,6 +83,23 @@ the lead already knows which of six reds is the one that matters, and no fold ra
 page draws the `crewmate wrote this` tag only when the host says the field IS agentic, so
 a value arriving some other way cannot borrow the label.
 
+A person answers `for_you` cards in the chat as often as on the cards: a typed reply, an
+option clicked in the chat, a steer into the running turn. None of those passes through
+the page, so the host says when the person last spoke in the chat the page belongs to,
+as `window.kirocrew.last_user_at` (UTC in whole seconds, like `written_at`, from the
+chat's own human-marked rows; `""` when it has none). `project-report` folds answered
+cards in two groups under the desk. Cards picked on the page go under **Answered**
+(`verdict.words.answered`), each with **Undo**. Cards written before that stamp
+(`written_at.for_you`) go under **Answered in chat** (`verdict.words.in_chat`), each with
+the line "You replied in chat after this" (`verdict.words.replied`) and a **Show card**
+button (`verdict.words.reopen`). The in-chat cards leave the Needs-you number but stay
+counted: the header adds "N answered in chat" after "N need you", and when nothing else
+needs the reader the Needs-you KPI's subtitle says "N answered in chat" instead of
+"nothing waiting on you". **Show card** unfolds its card until the person's next reply;
+the card it brings back is flashed and takes focus, and keeps the "You replied in chat
+after this" line so its live buttons are not read as an unanswered ask. Once the
+crewmate writes the list after the reply, the cards it kept ask again.
+
 ## What a crewmate published
 
 `project-report` also binds `published` to `{"fold": "panel", "path": "data"}`: the

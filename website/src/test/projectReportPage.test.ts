@@ -93,6 +93,7 @@ function mount(
     agentic?: string[]
     seq?: number
     locale?: string
+    last_user_at?: string
   } = {},
 ) {
   ;(window as unknown as { kirocrew: unknown }).kirocrew = {
@@ -105,6 +106,7 @@ function mount(
     // The host sets this only when the reader has a non-English UI locale; an absent
     // key is the English default, which is what every existing case above relies on.
     ...(extra.locale === undefined ? {} : { locale: extra.locale }),
+    ...(extra.last_user_at === undefined ? {} : { last_user_at: extra.last_user_at }),
   }
   document.body.replaceChildren(
     ...new DOMParser().parseFromString(MARKUP, 'text/html').body.childNodes,
@@ -122,10 +124,14 @@ function mount(
  * hears and re-renders from. Only this second thing can show that a refresh leaves
  * an expanded row expanded, because only this second thing has the state to lose.
  */
-function refresh(fields: Record<string, unknown>, extra: { written_at?: Record<string, string> } = {}) {
+function refresh(
+  fields: Record<string, unknown>,
+  extra: { written_at?: Record<string, string>; last_user_at?: string } = {},
+) {
   const api = (window as unknown as { kirocrew: Record<string, unknown> }).kirocrew
   api.fields = fields
   if (extra.written_at) api.written_at = extra.written_at
+  if (extra.last_user_at !== undefined) api.last_user_at = extra.last_user_at
   window.dispatchEvent(new MessageEvent('message', { data: { type: 'kirocrew:fields' } }))
 }
 
@@ -1076,6 +1082,248 @@ describe('project-report: the page the gateway ships', () => {
         last_entry_at: iso(3),
       })
       expect(document.querySelector('.pr-dr')).toBeNull()
+    })
+  })
+
+  // ------------------------------------------- a reply in the chat answers the cards
+  describe('a card the person answered in the chat', () => {
+    // A reply typed in the chat, an option clicked there and a steer into the running
+    // turn never pass through this page. The host says when the person last spoke in
+    // the chat (`last_user_at`), so cards the crewmate wrote BEFORE that fold under
+    // Answered in chat, not asking the reader, until it writes the list again.
+    const WROTE = iso(10)
+    const cards = [
+      { text: 'Fix the CLI bubble?', ask: 'decide', options: ['Fix it', 'Leave it'], workstream: '' },
+      { text: 'Fix skill_search?', ask: 'decide', options: ['Fix it', 'Leave it'], workstream: '' },
+    ]
+    // One worker question beside the cards, so the KPI card is drawn and a count that
+    // dropped only the answered cards is told apart from one that dropped everything.
+    const page = (over: Record<string, unknown> = {}) => ({
+      items: [
+        board(
+          [task({ item_id: 'q1', title: 'which base?', status: 'question', last_report_at: iso(2) })],
+          { needs_you: 1 },
+        ),
+      ],
+      omitted: 0,
+      series: [],
+      for_you: cards,
+      last_entry_at: iso(3),
+      ...over,
+    })
+    const openCards = () => all('.pr-todo-i > .pr-todo-x > b').map((n) => n.textContent?.trim())
+    const folds = () => all('.pr-fold > summary').map((n) => n.textContent?.trim())
+    const sentLines = () => all('.pr-todo-sent').map((n) => n.textContent?.trim() ?? '')
+    const needsKpi = () => {
+      const card = all('.pr-kpi').find((k) => k.querySelector('.pr-kpi-label')?.textContent === 'Needs you')
+      return own(card?.querySelector('.pr-kpi-v'))
+    }
+    const needsSub = () => {
+      const card = all('.pr-kpi').find((k) => k.querySelector('.pr-kpi-label')?.textContent === 'Needs you')
+      return card?.querySelector('.pr-kpi-sub')?.textContent?.trim() ?? ''
+    }
+    const replied = { written_at: { for_you: WROTE }, last_user_at: iso(5) }
+
+    it('folds the cards written before the reply under Answered in chat, saying why', () => {
+      mount(page(), replied)
+      expect(openCards()).toEqual(['which base?'])
+      // Picked nothing on the page, so they are not under Answered.
+      expect(folds()).toEqual(['Answered in chat \u00b7 2'])
+      const lines = sentLines()
+      expect(lines).toHaveLength(2)
+      for (const line of lines) expect(line).toContain('\u2192 You replied in chat after this')
+    })
+
+    it('says in the header how many were answered in chat', () => {
+      mount(page(), replied)
+      expect(text('#pr-sentence')).toContain('1 needs you, 2 answered in chat')
+      // Nothing is added when no card is folded by a reply.
+      mount(page(), { written_at: { for_you: WROTE } })
+      expect(text('#pr-sentence')).not.toContain('answered in chat')
+    })
+
+    it('says on the KPI card how many were answered in chat when nothing else needs the reader', () => {
+      const quiet = page({ items: [board([task({ item_id: 'p1', title: 'build it', status: 'progress' })])] })
+      mount(quiet, replied)
+      expect(needsKpi()).toBe('0')
+      expect(needsSub()).toBe('2 answered in chat')
+      mount(quiet, { written_at: { for_you: WROTE } })
+      expect(needsSub()).toBe('2 of them raised by the crewmate')
+    })
+
+    it('takes them out of every Needs-you count, and only them', () => {
+      mount(page(), { written_at: { for_you: WROTE } })
+      expect(needsKpi()).toBe('3')
+      expect(text('#pr-sentence')).toContain('3 need you')
+      mount(page(), replied)
+      expect(needsKpi()).toBe('1')
+      expect(text('#pr-sentence')).toContain('1 needs you')
+      // None of the one left was raised by the crewmate, and nothing is "not shown".
+      expect(text('.pr-kpis')).not.toContain('raised by the crewmate')
+      expect(text('#pr-view')).not.toContain('more not shown')
+    })
+
+    it('still names the worker asks a truncated list could not show', () => {
+      // The fold counts three asks on the board and the page holds one of them. The two
+      // answered cards are drawn but not counted, so they cannot stand in for the two
+      // asks the list dropped.
+      const truncated = page({
+        items: [
+          board(
+            [task({ item_id: 'q1', title: 'which base?', status: 'question', last_report_at: iso(2) })],
+            { needs_you: 3, tasks_omitted: 2 },
+          ),
+        ],
+      })
+      mount(truncated, replied)
+      expect(needsKpi()).toBe('3')
+      expect(text('#pr-view')).toContain('2 more not shown (list truncated)')
+    })
+
+    it('keeps asking when the crewmate wrote the list after the reply', () => {
+      mount(page(), { written_at: { for_you: iso(5) }, last_user_at: iso(10) })
+      expect(openCards()).toEqual(['which base?', 'Fix the CLI bubble?', 'Fix skill_search?'])
+      expect(folds()).toEqual([])
+    })
+
+    it('keeps asking when the reply and the list share a second', () => {
+      // The host sends both stamps at whole seconds, so a list written later in the
+      // same second as the reply reads as EQUAL to it, which is not answered.
+      mount(page(), { written_at: { for_you: '2026-10-04T17:02:00+00:00' }, last_user_at: '2026-10-04T17:02:00+00:00' })
+      expect(openCards()).toHaveLength(3)
+      expect(folds()).toEqual([])
+    })
+
+    it('keeps asking when either stamp cannot be read', () => {
+      for (const extra of [
+        { written_at: { for_you: WROTE }, last_user_at: 'not a time' },
+        { written_at: { for_you: WROTE }, last_user_at: '' },
+        { written_at: { for_you: WROTE } },
+        { written_at: {}, last_user_at: iso(5) },
+        { written_at: { for_you: 'not a time' }, last_user_at: iso(5) },
+      ]) {
+        mount(page(), extra)
+        expect(openCards(), JSON.stringify(extra)).toHaveLength(3)
+        expect(text('#pr-sentence'), JSON.stringify(extra)).toContain('3 need you')
+      }
+    })
+
+    it('asks again once the crewmate writes the list after the reply', () => {
+      mount(page(), replied)
+      expect(openCards()).toHaveLength(1)
+      refresh(page(), { written_at: { for_you: iso(1) } })
+      expect(openCards()).toHaveLength(3)
+      expect(text('#pr-sentence')).toContain('3 need you')
+    })
+
+    it('unfolds a card on Show card until the next reply folds it again', () => {
+      mount(page(), replied)
+      const buttons = all('.pr-todo-sent button').map((b) => b.textContent)
+      expect(buttons).toEqual(['Show card', 'Show card'])
+      ;(all('.pr-todo-sent button')[0] as HTMLButtonElement).click()
+      expect(openCards()).toEqual(['which base?', 'Fix the CLI bubble?'])
+      expect(folds()).toEqual(['Answered in chat \u00b7 1'])
+      expect(text('#pr-sentence')).toContain('2 need you, 1 answered in chat')
+      // A refill with the same reply keeps the card the reader unfolded.
+      refresh(page())
+      expect(openCards()).toEqual(['which base?', 'Fix the CLI bubble?'])
+      // A newer reply answers it again.
+      refresh(page(), { last_user_at: iso(4) })
+      expect(openCards()).toEqual(['which base?'])
+      expect(folds()).toEqual(['Answered in chat \u00b7 2'])
+    })
+
+    it('moves focus to the card Show card brings back, flashed and still saying a reply went in', () => {
+      mount(page(), replied)
+      ;(all('.pr-todo-sent button')[0] as HTMLButtonElement).click()
+      const active = document.activeElement as HTMLElement
+      expect(active.classList.contains('pr-todo-i')).toBe(true)
+      expect(active.querySelector('.pr-todo-x > b')?.textContent).toBe('Fix the CLI bubble?')
+      expect(active.classList.contains('pr-flash')).toBe(true)
+      expect(active.tabIndex).toBe(-1)
+      expect(active.textContent).toContain('You replied in chat after this')
+      // Only the card brought back is marked, and the next render marks nothing.
+      expect(all('.pr-todo-i.pr-flash')).toHaveLength(1)
+      refresh(page())
+      expect(all('.pr-todo-i.pr-flash')).toHaveLength(0)
+    })
+
+    it('unfolds a card picked on the page and then sent, with one Undo', () => {
+      mount(page(), { written_at: { for_you: WROTE } })
+      const fix = all('.pr-todo-opt').find((b) => b.textContent === 'Fix it') as HTMLButtonElement
+      fix.click()
+      vi.advanceTimersByTime(200)
+      // The person sent what the button put in the chat box: that is a reply too.
+      refresh(page(), { last_user_at: iso(5) })
+      expect(sentLines()[0]).toContain('\u2192 Fix it')
+      // A card picked on the page keeps Undo under Answered; the one folded by the reply
+      // alone goes under Answered in chat, with Show card.
+      expect(folds()).toEqual(['Answered \u00b7 1', 'Answered in chat \u00b7 1'])
+      expect(sentLines()[1]).toContain('\u2192 You replied in chat after this')
+      expect(all('.pr-todo-sent button').map((b) => b.textContent)).toEqual(['Undo', 'Show card'])
+      ;(all('.pr-todo-sent button')[0] as HTMLButtonElement).click()
+      expect(openCards()).toContain('Fix the CLI bubble?')
+    })
+
+    it('folds every card on an unrelated reply the crewmate has not answered, each still on the page', () => {
+      // The person writes about something else and the crewmate has not written the
+      // list again yet: every card folds, and each stays drawn with its own text and its
+      // own Show card button, so none of them leaves the page.
+      mount(page(), replied)
+      expect(openCards()).toEqual(['which base?'])
+      expect(folds()).toEqual(['Answered in chat \u00b7 2'])
+      const rows = all('.pr-todo-sent')
+      expect(rows.map((r) => r.querySelector('b')?.textContent)).toEqual(['Fix the CLI bubble?', 'Fix skill_search?'])
+      expect(rows.map((r) => r.querySelector('button')?.textContent)).toEqual(['Show card', 'Show card'])
+      // The crewmate's next write shows them asking.
+      refresh(page(), { written_at: { for_you: iso(1) } })
+      expect(openCards()).toEqual(['which base?', 'Fix the CLI bubble?', 'Fix skill_search?'])
+      expect(folds()).toEqual([])
+    })
+
+    it('says nothing is left to pick only when every folded card was picked on the page', () => {
+      const NOTHING = 'Nothing left to pick.'
+      // Every card folded by the chat reply alone: the crewmate may still ask again,
+      // so the desk does not say nothing is left.
+      mount({ items: [], for_you: cards }, replied)
+      expect(openCards()).toEqual([])
+      expect(folds()).toEqual(['Answered in chat \u00b7 2'])
+      expect(text('#pr-view')).not.toContain(NOTHING)
+      // Every card picked on the page, and none answered in chat: the line still shows.
+      mount({ items: [], for_you: cards }, { written_at: { for_you: WROTE } })
+      for (let n = 0; n < 2; n++) {
+        const fix = all('.pr-todo-opt').find((b) => b.textContent === 'Fix it') as HTMLButtonElement
+        fix.click()
+        vi.advanceTimersByTime(200)
+      }
+      expect(openCards()).toEqual([])
+      expect(folds()).toEqual(['Answered \u00b7 2'])
+      expect(text('#pr-view')).toContain(NOTHING)
+    })
+
+    it('keeps an answered card reachable on a page with no board', () => {
+      mount({ items: [], for_you: cards }, replied)
+      expect(folds()).toEqual(['Answered in chat \u00b7 2'])
+      expect(all('.pr-todo-sent button')).toHaveLength(2)
+      expect(text('#pr-sentence')).toContain('0 need you, 2 answered in chat')
+      expect(text('#pr-view')).not.toContain('Nothing needs you, and nothing has been spent')
+    })
+
+    it('words the line in the crewmate\u2019s language, else in the reader\u2019s', () => {
+      mount(
+        page({ verdict: { words: { replied: 'Saw your reply', reopen: 'Bring back', in_chat: 'With the crewmate' } } }),
+        replied,
+      )
+      expect(sentLines()[0]).toContain('\u2192 Saw your reply')
+      expect(text('.pr-todo-sent button')).toBe('Bring back')
+      expect(folds()).toEqual(['With the crewmate \u00b7 2'])
+      mount(page(), { ...replied, locale: 'zh-CN' })
+      // The zh-CN table defaults for word_replied, word_in_chat, word_reopen and the
+      // header's in_chat_suffix.
+      expect(sentLines()[0]).toContain('\u8fd9\u6761\u4e4b\u540e\u4f60\u5728\u804a\u5929\u91cc\u56de\u590d\u4e86')
+      expect(folds()).toEqual(['\u804a\u5929\u91cc\u56de\u590d\u8fc7 \u00b7 2'])
+      expect(text('.pr-todo-sent button')).toBe('\u663e\u793a\u5361\u7247')
+      expect(text('#pr-sentence')).toContain('\uff0c2 \u4e2a\u5728\u804a\u5929\u91cc\u56de\u590d\u8fc7')
     })
   })
 
