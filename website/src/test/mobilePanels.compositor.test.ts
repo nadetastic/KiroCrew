@@ -25,10 +25,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { readMembersPage } from './membersPageFamily'
 
 const app = readFileSync(resolve(__dirname, '../App.tsx'), 'utf8')
 const chat = readFileSync(resolve(__dirname, '../pages/ChatPage.tsx'), 'utf8')
-const members = readFileSync(resolve(__dirname, '../pages/members/MembersPage.tsx'), 'utf8')
+const members = readMembersPage()
 const hook = readFileSync(resolve(__dirname, '../hooks/useDrawerSwipe.ts'), 'utf8')
 
 describe('mobile nav drawer (left) — compositor pairing', () => {

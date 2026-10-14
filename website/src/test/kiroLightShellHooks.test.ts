@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readMembersPage } from './membersPageFamily'
 
 const read = (...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf8')
 const css = read('index.css')
@@ -63,7 +64,7 @@ describe('kiro-light shell hooks', () => {
 
   it.each([
     ['pages', 'ChatSidebar.tsx'],
-    ['pages', 'members', 'MembersPage.tsx'],
+    ['pages', 'members', 'MembersPageRoster.tsx'],
   ])('%s/%s mounts the shared list shell, so the kiro-light --panel step-back reaches both cards', (...file) => {
     // The roster once carried its own bg-bg-elevated card and stayed white on
     // the white canvas while the sessions list beside it stepped back to
@@ -71,7 +72,8 @@ describe('kiro-light shell hooks', () => {
     const src = read(...file)
     expect(src, KEEP_HOOK('sidebar-inner', file)).toMatch(/import \{[^}]*\bLIST_SHELL_CLS\b[^}]*\} from '(\.\.\/)+components\/listShell'/)
     expect(src, KEEP_HOOK('sidebar-inner', file)).toMatch(/\$\{LIST_SHELL_CLS\}/)
-    expect(src, KEEP_HOOK('sidebar-inner', file)).not.toMatch(/className="sidebar sidebar-inner /)
+    const scan = file[1] === 'members' ? readMembersPage() : src
+    expect(scan, KEEP_HOOK('sidebar-inner', file)).not.toMatch(/className="sidebar sidebar-inner /)
   })
 
   it('the user bubble tint is scoped to the non-steer branch only', () => {

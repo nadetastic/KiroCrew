@@ -17,6 +17,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readMembersPage } from './membersPageFamily'
 
 import ResizeHandle from '../components/ResizeHandle'
 import type { usePointerDrag } from '../hooks/usePointerDrag'
@@ -31,20 +32,21 @@ const NOOP_HANDLE: HandleProps = {
   onLostPointerCapture: () => {},
 }
 
-const SURFACES: ReadonlyArray<readonly [name: string, file: string]> = [
-  ['ChatSidebar', join(process.cwd(), 'src', 'pages', 'ChatSidebar.tsx')],
-  ['MembersPage', join(process.cwd(), 'src', 'pages', 'members', 'MembersPage.tsx')],
+/** Per page: the file that renders its grip, and the text the negative pin reads. */
+const SURFACES: ReadonlyArray<readonly [name: string, file: string, scan: () => string]> = [
+  ['ChatSidebar', join(process.cwd(), 'src', 'pages', 'ChatSidebar.tsx'), () => readFileSync(join(process.cwd(), 'src', 'pages', 'ChatSidebar.tsx'), 'utf8')],
+  ['MembersPage', join(process.cwd(), 'src', 'pages', 'members', 'MembersPageRoster.tsx'), readMembersPage],
 ]
 
 describe('column resize grip — one component on both pages', () => {
-  it.each(SURFACES)('%s mounts the shared ResizeHandle and hand-rolls no vertical separator', (_name, file) => {
+  it.each(SURFACES)('%s mounts the shared ResizeHandle and hand-rolls no vertical separator', (_name, file, scan) => {
     const src = readFileSync(file, 'utf8')
     expect(src).toMatch(/import ResizeHandle from '(\.\.\/)+components\/ResizeHandle'/)
     expect(src).toContain('<ResizeHandle')
     // A raw vertical separator in the page is the drift this pin forbids. The
     // sidebar's horizontal history-pane splitter is a different affordance and
     // stays out of scope, hence the orientation in the pattern.
-    expect(src).not.toMatch(/aria-orientation="vertical"/)
+    expect(scan()).not.toMatch(/aria-orientation="vertical"/)
   })
 
   it('renders the sidebar bar recipe: 6px hit strip carrying a 2px rounded accent-on-hover bar', () => {

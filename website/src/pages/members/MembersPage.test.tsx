@@ -287,7 +287,7 @@ import MembersPage, { CREW_DASHBOARD_TAB_ID, CREW_PANEL_TAB_IDS, MEMBERS_UNCONFI
 import { resetFirstGreetingRequests } from './useFirstGreeting'
 import { __resetPanelTabs, VIEW_DATA_SOURCE } from '../../hooks/usePanelTabs'
 
-/** The page's own memory key (mirrors the constant in MembersPage.tsx). */
+/** The page's own memory key (mirrors `LAST_MEMBER_KEY` in useMembersPageNavigation.ts). */
 const LAST_MEMBER_KEY = 'mc-members-last-member'
 // Spelled out rather than imported: the value IS the contract with a returning
 // browser, so a rename of the page's constant must fail here.

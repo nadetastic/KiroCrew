@@ -16,6 +16,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { readMembersPage } from './membersPageFamily'
 
 import * as shell from '../components/listShell'
 
@@ -37,9 +38,11 @@ function sidebarFiles(): string[][] {
   return out
 }
 
-const PAGES: ReadonlyArray<readonly [label: string, files: readonly string[][]]> = [
-  ['ChatSidebar', sidebarFiles()],
-  ['MembersPage', [['pages', 'members', 'MembersPage.tsx']]],
+/** Per page: the files that draw its list shell, and the text the negative pin reads. */
+const PAGES: ReadonlyArray<readonly [label: string, files: readonly string[][], scan: () => string]> = [
+  ['ChatSidebar', sidebarFiles(), () => source(sidebarFiles())],
+  // The roster card is drawn by its column, its rows by MembersPageRosterRows.
+  ['MembersPage', [['pages', 'members', 'MembersPageRoster.tsx'], ['pages', 'members', 'MembersPageRosterRows.tsx']], readMembersPage],
 ]
 
 /** One page's source text: every file it is built from, joined. */
@@ -84,8 +87,8 @@ describe('list shell parity — sessions sidebar and members roster share one re
     }
   })
 
-  it.each(PAGES)('%s spells none of the recipes out by hand', (_label, files) => {
-    const src = source(files)
+  it.each(PAGES)('%s spells none of the recipes out by hand', (_label, files, scan) => {
+    const src = scan()
     const file = files[0]
     for (const lit of FORBIDDEN_LITERALS) {
       expect(src.includes(lit), `${file.join('/')} re-inlines "${lit}" — use the components/listShell recipe`).toBe(false)

@@ -1476,6 +1476,66 @@ resolvers refuse them; `kirocrew agent list` shows a malformed `memory_store` as
 `(invalid: <type>)`. The roster and config views still mask a non-string on their
 own side as defence in depth.
 
+### Crewmates page code: the facade and its owners
+
+`website/src/pages/members/MembersPage.tsx` is the page's one import path (App's
+lazy route and the capture entries import its default export; tests import its
+named exports). It composes owners beside it, calling each one where its code
+sits in the page's hook order: React runs a component's effects in registration
+order, so the order is part of the behaviour, and `MembersPage.owners.test.tsx`
+pins it together with the facade's exports and the rule that no owner imports
+the facade. New work goes to the owner of its responsibility:
+
+| Owner | Holds |
+|---|---|
+| `MembersPage.tsx` | the composition; the page's selection state (open crewmate, crew being edited, open Profile card); the New crewmate card and its post-create follow-up; the guide facts and hand-offs; the exit guards (the native confirms the lint allowlist permits); the face-flight overlay |
+| `membersPageModel.ts` | pure rules: `resolveMateLanding`, `resolveDefaultMember`, `memberMemoryDisplay`, `panelSitsBeside`, `panelChrome`, the withheld view sets, `createDraftFromHref`, the `?member=` param and the roster width bounds |
+| `useMembersPageRoster.ts` | the roster read and its projection merge; per-row live readings (unread, patrol, loop, needs-you); applying the filters to the held order (`sortedMembers`) and the filter menu's tallies, which need those readings |
+| `MembersPageRoster.tsx` | the roster column (header and add menu, search, filter menu, chip, team groups, resize grip) and the roster view state: presence, the open crewmate's projected record and DM identity (`activeRoster`, `activeView`, `crewmateIdentity`), the persisted filters and sort with the question they ask (`rosterFilterQuery`) and the population it lists, starring, the held order |
+| `MembersPageRosterRows.tsx` | `MemberRow` (one roster row, reading its own `roster` projection) and `CrewmateEmptyHero` (the empty roster's call to action) |
+| `useMembersPageCrewEditor.ts` | the in-place `CrewEditorDialog`: its registry reads, the admitted-roster latch, the unsaved and in-flight stakes |
+| `useMembersPageTeams.ts` | the team read, collapsed groups, the team dialog, and the team view (open, close, grouping) |
+| `useMembersPageLayout.ts` | column placement: roster width, pin and fold; the phone top bar; the side panel docked or overlaid |
+| `useMembersPageDrawers.ts` | the phone roster drawer, the side panel slide, the swipe bindings |
+| `MembersPageThread.tsx` | the open thread (open POST, first greeting, Fresh start, reconnect, confirmed slot), its on-screen readings (pill activity, header insets, greeting card, read marking) and the thread column |
+| `MembersPageThreadHeader.tsx` | the floating DM header: switcher chip, back control, identity pill, panel opener |
+| `MembersPageProfile.tsx` | the Profile card: open, close and placement (`requestCloseProfile`; `togglePanel` and the `toggle-activity-panel` listener that folds the card when the panel is revealed), the Schedules draft and its guard, the face flight with the page's reduced-motion reading, the card's clock, the card render |
+| `MembersPageSidePanel.tsx` | the SidePanel binding to the confirmed slot and its render; the Sessions list and Schedules retention state declared in its stretch of the hook order |
+| `useMembersPageNavigation.ts` | `activate` / `openMember`, the drawer pick, in-thread preview links, and the URL sync that decides the open crewmate |
+
+The Profile card's Schedules draft is guarded at every exit that would unmount
+it. Each piece of that guard registers at its own place in the hook order, so the
+pieces sit in different owners:
+
+- `useMembersPageProfile` (`MembersPageProfile.tsx`) declares `schedGuardRef` and
+  `schedAtStakeRef`, the two refs every in-page exit reads. It also holds the exits
+  that close or fold the card: `requestCloseProfile` (the card's close and the
+  header's identity pill) and `togglePanel` (the header's panel opener and the
+  `toggle-activity-panel` listener). Two effects there keep a dirty card where it
+  is rather than ask: a cross-tab panel reveal, and the phone re-placement of a
+  docked card as the floating one.
+- The other exits read the same refs where they live: the card's Back
+  (`requestProfileBack`, `MembersPageProfileCard`); the phone back / roster
+  control (`MembersPageThreadHeader.tsx`); `openCrewWorkLog`, `openCrewView`,
+  `openSessionGuarded` and the Dashboard tab's `onOpenProfileTab`
+  (`MembersPageSidePanel.tsx`); a crewmate pick (`openMember`,
+  `useMembersPageNavigation.ts`); and a team open (`openTeam`,
+  `useMembersPageTeams.ts`).
+- `MembersPage.tsx` assigns both refs once `schedulesMounted` is known, and keeps
+  the exits the page owns: the route-leave guard, the published navigation stake
+  (`usePublishNavigationStake`, which `NavigationBackGuard` arms off) and the
+  `beforeunload` guard.
+- `useMembersPageSchedules` (`MembersPageProfile.tsx`) holds the draft's refs
+  `schedDraftDirty` and `schedSaving`, `releaseSchedRetention` with the effect
+  that re-arms it, and `mayLeaveSchedules`, the question the guards ask.
+- `useMembersPageSidePanel` (`MembersPageSidePanel.tsx`) declares, at their place
+  in the hook order, `schedAtStake` (the state mirror `useMembersPageSchedules`
+  sets; it feeds the published stake and the `beforeunload` guard), `schedReleased`
+  and `schedulesMountedRef`.
+- `useMembersPageCrewEditor` declares `releaseSchedRef`; `useMembersPageSchedules`
+  points it at `releaseSchedRetention`, so a confirmed crew delete
+  (`onCrewDeleted`) stands the retention down.
+
 ### Crewmate conversation layout: switcher, Profile, Dashboard, Files
 
 When a crewmate conversation is open, the standing roster is hidden at every
