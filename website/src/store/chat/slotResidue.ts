@@ -31,6 +31,7 @@ import {
 const slotKeyedMaps = (state: ChatState) => [
   state.slotMessages, state.slotActivity, state.slotRun, state.slotHydrated,
   state.slotSide, state.slotSideClosed, state.slotStatusDetail,
+  state.warmTaskBriefStatus,
   state.slotContextPct, state.slotContextTokens, state.stopPressedAt,
   state.endedTurn,
   state.followups, state.folderSuggestions, state.restoredQuestionNotices,

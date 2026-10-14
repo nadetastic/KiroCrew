@@ -6,7 +6,7 @@ import { sseTodoUpdate, sseMcpReportUpdate, sseSlotTitle, triggerRefresh, fetchS
 import { addNotification, ackNotificationByTs, unackNotificationByTs, clearAllNotifications } from '../store/notificationsSlice'
 import { dispatchMcNotification, dispatchLiveNotification } from './notificationEvent'
 import {
-  fetchHistory, sseChatMessage, sseChatMessageUpdate, sseChatMessagePatchByTs, refreshSlot, sseContextUsage, clearMessages, clearSlotCache, sseSubagentPending, sseSubagentSpawn, sseSubagentQueued, sseSubagentTool, sseSubagentStalled, sseSubagentRetrying, sseSubagentDone, sseSubagentSnapshot, sseSubagentBatchUpdate, sseSubagentBatchChunks, sseToolResult, sseActivityEvent, sseSideResult, sseWorkflowEvent, setSlotStatusDetail, removeQueuedMessage, appendQueuedMessage, cancelQueuedMessage, editQueuedMessage, reorderQueuedMessages, sseMcpAppRender, sseSideQueue, queueEntryAttachments, isTerminalWorkflowStatus,
+  fetchHistory, sseChatMessage, sseChatMessageUpdate, sseChatMessagePatchByTs, refreshSlot, sseContextUsage, clearMessages, clearSlotCache, sseSubagentPending, sseSubagentSpawn, sseSubagentQueued, sseSubagentTool, sseSubagentStalled, sseSubagentRetrying, sseSubagentDone, sseSubagentSnapshot, sseSubagentBatchUpdate, sseSubagentBatchChunks, sseToolResult, sseActivityEvent, sseSideResult, sseWorkflowEvent, setSlotStatusDetail, setWarmTaskBriefStatus, removeQueuedMessage, appendQueuedMessage, cancelQueuedMessage, editQueuedMessage, reorderQueuedMessages, sseMcpAppRender, sseSideQueue, queueEntryAttachments, isTerminalWorkflowStatus,
 } from '../store/chatSlice'
 import { store } from '../store'
 import { TAB_ID } from '../api/tabId'
@@ -285,6 +285,16 @@ export function useWebSocket() {
               // Ordinary updates retain last-good content; removals must not.
               if (removed) queryClient.resetQueries({ queryKey: ['dashboard-card', slot] })
               else queryClient.invalidateQueries({ queryKey: ['dashboard-card', slot] })
+            }
+            break
+          }
+          case 'warm_task_brief_status': {
+            const { slot, status } = data as { slot?: unknown; status?: unknown }
+            if (
+              typeof slot === 'string'
+              && (status === 'preparing' || status === 'unavailable' || status === 'clear')
+            ) {
+              dispatch(setWarmTaskBriefStatus({ slot, status }))
             }
             break
           }

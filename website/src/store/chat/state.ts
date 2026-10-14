@@ -164,6 +164,8 @@ export interface ChatState {
   slotStopping: boolean
   slotState: SlotState
   slotStatusDetail: Record<string, SlotStatusDetail>
+  /** Return-summary status, transient and keyed by the owning slot. */
+  warmTaskBriefStatus: Record<string, 'preparing' | 'unavailable'>
   slotHasMore: boolean
   slotOldestIndex: number
   /** Slot the cursor above describes. A switch moves activeSlot first, so
@@ -577,6 +579,7 @@ export const initialState: ChatState = {
   slotStopping: false,
   slotState: 'idle',
   slotStatusDetail: {},
+  warmTaskBriefStatus: {},
   slotHasMore: false,
   slotOldestIndex: 0,
   slotCursorKey: null,

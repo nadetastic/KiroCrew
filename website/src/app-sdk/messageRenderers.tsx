@@ -32,6 +32,7 @@ import { renderMcpOAuthMessage } from '../pages/chat/McpOAuthBanner'
 import SubagentCompletionCard from '../pages/chat/SubagentCompletionCard'
 import NudgeCard from '../pages/chat/NudgeCard'
 import NoticeCard from '../pages/chat/NoticeCard'
+import WarmTaskBriefCard, { isWarmTaskBriefClaim, warmTaskBriefOf } from '../pages/chat/WarmTaskBriefCard'
 import { SystemNoticeRow, isSystemNoticeRow } from '../pages/chat/CompactionCard'
 import SkillLoadCard, { isSkillLoadRow } from '../pages/chat/SkillLoadCard'
 import { ErrorCard } from '../pages/chat/ErrorCard'
@@ -692,6 +693,21 @@ export const defaultMessageRenderers: readonly MessageRenderer[] = [
         return ctx.row(<NoticeCard content={transient.text} tone={transient.tone} />)
       }
       return ctx.row(<ErrorCard content={transient ? transient.text : m.content} meta={m.meta} />)
+    },
+  },
+  {
+    id: 'warm_task_brief_claim',
+    roles: ['notice'],
+    match: isWarmTaskBriefClaim,
+    render: () => null,
+  },
+  {
+    id: 'warm_task_brief',
+    roles: ['notice'],
+    match: m => warmTaskBriefOf(m) !== null,
+    render: (m, ctx) => {
+      const brief = warmTaskBriefOf(m)
+      return brief ? ctx.row(<WarmTaskBriefCard brief={brief} />) : null
     },
   },
   {

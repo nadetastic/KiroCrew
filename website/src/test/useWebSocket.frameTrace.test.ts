@@ -301,6 +301,12 @@ const FRAME_CASES: Array<[string, Frame[], Frame[]]> = [
     { type: 'slot_projection', data: {} },
   ]],
   ['session_summary', [], [{ type: 'session_summary', data: { key: ACTIVE } }, { type: 'session_summary', data: {} }]],
+  ['warm task brief status', [], [
+    { type: 'warm_task_brief_status', data: { slot: ACTIVE, status: 'preparing' } },
+    { type: 'warm_task_brief_status', data: { slot: ACTIVE, status: 'unavailable' } },
+    { type: 'warm_task_brief_status', data: { slot: ACTIVE, status: 'clear' } },
+    { type: 'warm_task_brief_status', data: { slot: ACTIVE, status: 'bad' } },
+  ]],
   ['pins_changed', [], [{ type: 'pins_changed', data: { slot_key: ACTIVE } }, { type: 'pins_changed', data: {} }]],
   ['artifact_update', [], [{ type: 'artifact_update', data: { slug: 'doc' } }]],
   ['artifact_update deleted', [], [{ type: 'artifact_update', data: { slug: 'doc', deleted: true } }, { type: 'artifact_update', data: {} }]],
@@ -593,6 +599,30 @@ describe('useWebSocket lifecycle trace', () => {
     expect(trace).toEqual(EXPECTED_LIFECYCLE['reconnect catch-up'])
   })
 
+  it('hidden reconnect sends no return frame until visibility returns', async () => {
+    const { ws, view } = await mountOpen()
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    try {
+      act(() => document.dispatchEvent(new Event('visibilitychange')))
+      trace = []
+      vi.useFakeTimers()
+      try {
+        act(() => { ws.drop() })
+        act(() => { vi.advanceTimersByTime(1000) })
+      } finally {
+        vi.useRealTimers()
+      }
+      await act(async () => { WS_INSTANCES[1].open() })
+      expect(trace.some(line => line.includes('slot_focused'))).toBe(false)
+      hidden.mockReturnValue(false)
+      act(() => document.dispatchEvent(new Event('visibilitychange')))
+      expect(trace).toContain('send {"type":"slot_focused","slot":"slot-a"}')
+      view.unmount()
+    } finally {
+      hidden.mockRestore()
+    }
+  })
+
   it('reconnect after an update restart reloads', async () => {
     const { ws } = await mountOpen()
     act(() => { ws.frame({ type: 'update_progress', data: { step: 'restarting', detail: '' } }) })
@@ -871,6 +901,27 @@ describe('useWebSocket lifecycle trace', () => {
     expect(WS_INSTANCES).toHaveLength(1)
   })
 
+  it('a hidden first connect sends no focus frame; reveal sends the return frame', async () => {
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    try {
+      testStore.dispatch(sseSlots(SLOTS))
+      testStore.dispatch(setActiveSlot(ACTIVE))
+      const view = renderHook(() => useWebSocket(), {
+        wrapper: ({ children }) => createElement(Provider, { store: testStore },
+          createElement(QueryClientProvider, { client: qc }, children)),
+      })
+      const ws = WS_INSTANCES[0]
+      await act(async () => { ws.open() })
+      expect(trace.some(line => line.includes('slot_focused'))).toBe(false)
+      hidden.mockReturnValue(false)
+      act(() => document.dispatchEvent(new Event('visibilitychange')))
+      expect(trace).toContain('send {"type":"slot_focused","slot":"slot-a"}')
+      view.unmount()
+    } finally {
+      hidden.mockRestore()
+    }
+  })
+
   it('focus changes, visibility and the pane-focus emitter share one sender', async () => {
     const { emitSlotFocused } = await import('../hooks/useWebSocket')
     const { view } = await mountOpen()
@@ -960,6 +1011,11 @@ const EXPECTED_FRAMES: Record<string, string[]> = {
   ],
   "session_summary": [
     'query invalidateQueries ["session-summary","slot-a"]',
+  ],
+  "warm task brief status": [
+    'action chat/setWarmTaskBriefStatus {"slot":"slot-a","status":"preparing"}',
+    'action chat/setWarmTaskBriefStatus {"slot":"slot-a","status":"unavailable"}',
+    'action chat/setWarmTaskBriefStatus {"slot":"slot-a","status":"clear"}',
   ],
   "pins_changed": [
     'query invalidateQueries ["chat-pins","slot-a"]',
@@ -1623,7 +1679,7 @@ const EXPECTED_LIFECYCLE: Record<string, string[]> = {
   "focus sender": [
     'send {"type":"slot_focused","slot":"slot-b"}',
     'send {"type":"slot_focused","slot":"pane-slot"}',
-    'send {"type":"slot_focused","slot":null}',
+    'send {"type":"slot_focused","slot":null,"hidden":true}',
     'send {"type":"slot_focused","slot":"slot-b"}',
     'send {"type":"slot_read","slot":"slot-b","read_ts":"2026-09-01T00:00:00.000Z"}',
     'send {"type":"slot_focused","slot":"slot-b"}',

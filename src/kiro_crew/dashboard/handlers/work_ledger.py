@@ -780,6 +780,11 @@ async def api_work_report(request: web.Request) -> web.Response:
                     cite_unit=acting_unit,
                 )
             _audit(caller, "work_report", "ok", resources=f"{item_id} status={item.status}")
+            from kiro_crew.dashboard.warm_task_brief import cancel_warm_task_brief
+
+            task_slot = state.get_slot(conductor_key)
+            if task_slot is not None:
+                cancel_warm_task_brief(state, task_slot.key)
             return web.json_response(
                 {"ok": True, "item_id": item.item_id, "status": item.status, "round": item.round}
             )

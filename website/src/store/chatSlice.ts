@@ -851,6 +851,11 @@ const chatSlice = createSlice({
     setCloseRefused(state, action: PayloadAction<ChatState['closeRefused']>) {
       state.closeRefused = action.payload
     },
+    setWarmTaskBriefStatus(state, action: PayloadAction<{ slot: string; status: 'preparing' | 'unavailable' | 'clear' }>) {
+      const { slot, status } = action.payload
+      if (status === 'clear') delete state.warmTaskBriefStatus[slot]
+      else state.warmTaskBriefStatus[slot] = status
+    },
     ...runStateReducers,
     ...slotCacheReducers,
     ...composerCardReducers,
@@ -982,7 +987,7 @@ const chatSlice = createSlice({
 })
 
 export const {
-  setCloseRefused,
+  setCloseRefused, setWarmTaskBriefStatus,
   setActiveSlot, clearSlotState, setPendingInput, stageToMainComposer, setAgentSwitchNotice, clearUnresumableResume, clearUndeletableHistory, setQuestionCard, clearQuestionCard, setQuestionDraft, setQuestionNotice, setQuestionRequestInFlight, markQuestionSettled, resolveQuestionCard, setFollowupCard, clearFollowupCard, dismissFollowupItem, setFolderSuggestion, clearFolderSuggestion, ageFolderSuggestion, appendMessage, appendSlotMessage, updateStreamingMessage, finalizeAssistant,
   removeThinking, confirmOptimisticSend, markSendUnconfirmed, resolveOptimisticSteer, removeByApprovalId, resolveByApprovalId, clearPendingPermissions, setSlotRunning, setSlotStopping, settleStopNotRunning, startLocalTurn, startServerTurn, endLocalTurn, syncSlotRunningFromServer, setSlotState, setSlotStatusDetail, setStopPressedAt, clearMessages, clearSlotCache, truncateAfterIndex, replaceMessages, hydrateSlotMessages, sseChatMessage, sseChatMessageUpdate, sseChatMessagePatchByTs, sseThinkingChunk, removeQueuedMessage, appendQueuedMessage, cancelQueuedMessage, editQueuedMessage, reorderQueuedMessages,
   sseContextUsage, setVoicePlaying, setVoicePreparing, setVoiceAudio,

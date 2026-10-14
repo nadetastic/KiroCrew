@@ -239,6 +239,16 @@ older-page request with it; it reads the page before `slotOldestIndex` and lands
 it only while the slot it was read for is still active. A BACKGROUND pane (a crewmate DM on the Members page, a split pane) pages its OWN older history with the separate `loadOlderSlotMessages` thunk, which reads from that pane's own cursor (`slotPaneNextBefore`, written beside the page by `writeSlotPage`) and tracks its in-flight / failed state per slot in `slotPaneLoadingOlder` / `slotPaneOlderError`, so one pane's walk never blocks or reddens another's; `loadOlderMessages` walks only the active slot. None of these owners filters rows by memory
 mode, so a restricted transcript is cached and paged like any other.
 
+### Warm task brief rows
+
+A return-triggered task brief uses two `notice` rows. The hidden
+`warm_task_brief_claim` stores only a fingerprint and is suppressed by both
+transcript renderer registries. The visible `warm_task_brief` row stores the
+redacted original request, current-state facts, one to three next steps, and the
+fingerprint. `notice` is display-only, so neither row reaches replay, recall,
+consolidation, or other model-bound history readers. Both rows follow ordinary
+transcript reset and permanent-delete lifecycle.
+
 ### Card rows: change cards and guide offers
 
 A change card (`propose_change`) or a guide offer (`guide_start`) is part of the

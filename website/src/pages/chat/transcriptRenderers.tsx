@@ -42,6 +42,7 @@ import SkillLoadCard, { isSkillLoadRow } from './SkillLoadCard'
 import { ErrorCard, SESSION_START_REPEAT_REFUSAL_AT, isAppAgentRefused, isAuthRequired, isCapabilitiesChanged, isContextOverflow, isModelUnentitled, isSessionStartFailed, isTurnTimeout, isUsageLimit, sessionStartFailureStreak, type FreshSessionState } from './ErrorCard'
 import { FEATURE_REQUEST_FORM_URL, isFeatureRequestRow } from '../../prompts/featureRequest'
 import NoticeCard from './NoticeCard'
+import WarmTaskBriefCard, { isWarmTaskBriefClaim, warmTaskBriefOf } from './WarmTaskBriefCard'
 import { resolveTransientNotice } from './transientNotice'
 import WorkflowRunCard, { extractWorkflowRunId, isWorkflowRunTool } from './WorkflowRunCard'
 import SubagentRunCard, { extractSpawnRunLaunch, isSpawnRunTool } from './SubagentRunCard'
@@ -308,6 +309,21 @@ export function createTranscriptRenderers(
   const crewmateTranscript = o.crewmateTranscript
 
   return [
+    {
+      id: 'warm_task_brief_claim',
+      roles: ['notice'],
+      match: isWarmTaskBriefClaim,
+      render: () => null,
+    },
+    {
+      id: 'warm_task_brief',
+      roles: ['notice'],
+      match: m => warmTaskBriefOf(m) !== null,
+      render: (m, ctx) => {
+        const brief = warmTaskBriefOf(m)
+        return brief ? ctx.row(<WarmTaskBriefCard brief={brief} />) : null
+      },
+    },
     // ── Shape-matched rows, ahead of anything keyed only by role ──
     {
       // A dollar-picked skill is gateway-authored context, not a conversational

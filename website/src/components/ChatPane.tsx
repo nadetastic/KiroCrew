@@ -20,6 +20,7 @@ import { useCrewmateGreetingShown } from './chat/useCrewmateGreetingShown'
 import type { CrewmateIdentity } from '../pages/chat/CrewmateMessage'
 import ErrorNotice from './ErrorNotice'
 import StatusNotice from './StatusNotice'
+import NoticeCard from '../pages/chat/NoticeCard'
 import { Btn } from './ui'
 import ChatDropOverlay, { useChatFileDrop } from './ChatDropOverlay'
 import PaneDim from './PaneDim'
@@ -283,6 +284,7 @@ export default function ChatPane({
 }) {
   // One instance covers both dropdown filter inputs (never open at once).
   const dispatch = useAppDispatch()
+  const warmTaskBriefStatus = useAppSelector(s => s.chat.warmTaskBriefStatus[slotKey])
   const provider = useProvider()
   // Same gate the main chat uses: hide a Connections-owned OAuth banner only
   // while the card that owns that flow is reachable.
@@ -2208,6 +2210,19 @@ export default function ChatPane({
           />
         </div>
 
+        {warmTaskBriefStatus === 'preparing' && (
+          <div className="mx-4 mt-2 mb-0 animate-rise" data-testid="warm-task-brief-preparing">
+            <NoticeCard content={i18nT('pages.membersPage.warm_task_brief_preparing')} />
+          </div>
+        )}
+        <ErrorNotice
+          variant="inline"
+          className="mx-4 mt-2 mb-0 animate-rise"
+          testId="warm-task-brief-unavailable"
+          message={warmTaskBriefStatus === 'unavailable'
+            ? i18nT('pages.membersPage.warm_task_brief_unavailable')
+            : ''}
+        />
         <StatusNotice
           className="mx-4 mt-2 mb-0 animate-rise"
           testId="chat-pane-upload-hint"

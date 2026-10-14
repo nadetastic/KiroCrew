@@ -144,6 +144,25 @@ history-cache owners are listed in
 sub-agent and MCP App state in [side](side.md), [subagent](subagent.md) and
 [mcp-apps](mcp-apps.md).
 
+## Return-triggered warm task brief
+
+The owner-only `slot_focused` WebSocket frame also drives the warm task brief.
+Only `{slot: null, hidden: true}` from the last owner connection viewing a
+thread starts an in-memory away episode. The first later owner focus frame
+consumes it. It qualifies only when it names the same thread after at least 30
+minutes. Socket cleanup, reconnect, ordinary null frames, focus loss, route or
+thread changes, and elapsed time alone never start work.
+
+A qualifying return claims the current durable task fingerprint before sending
+`warm_task_brief_status: preparing` or starting one tool-free background model
+call. The fingerprint covers the original genuine user request, conversation
+task rows, session ledger, and work ledger. Claim and successful result are
+display-only transcript notices, so neither enters model history or changes the
+fingerprint. User turns, slot replacement, reset, close, task changes, and newer
+assistant rows clear or stale the transient status and suppress old output.
+Failure sends `unavailable`; success persists one redacted `warm_task_brief`
+notice. Away state is never persisted, so restart and network loss fail silent.
+
 ## Implementation Boundaries
 
 `SessionManager` remains the compatibility facade in `session.py`; callers keep

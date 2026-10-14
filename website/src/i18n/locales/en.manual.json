@@ -8739,7 +8739,12 @@
       "fresh_start_confirm_action": "Fresh start",
       "fresh_start_failed_queued": "Messages are still queued. Wait for them to finish, then try Fresh start again.",
       "fresh_start_failed_busy": "The crewmate is still working and didn't stop. Stop it first, then try Fresh start again.",
-      "fresh_start_unsaved_fold": "It forgot this conversation and the messages are folded away, but the fold time wasn't saved. They unfold again after a reload."
+      "fresh_start_unsaved_fold": "It forgot this conversation and the messages are folded away, but the fold time wasn't saved. They unfold again after a reload.",
+      "warm_task_brief_preparing": "Preparing your current-task summary. You can wait here.",
+      "warm_task_brief_unavailable": "I couldn't prepare the current-task summary.",
+      "warm_task_brief_original": "Original request",
+      "warm_task_brief_state": "Current task",
+      "warm_task_brief_next": "Next steps"
     }
   },
   "privacyDisclosure": {
