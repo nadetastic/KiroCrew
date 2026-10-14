@@ -1146,7 +1146,7 @@ _EXPECTED_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
     # ``toolsSettings.subagent.availableAgents`` allowlist, and keeps a file the
     # reader refuses as unreadable (refuse) rather than as "no spec"; a denial
     # there belongs to the sub-agent surface that asked to spawn.
-    "kiro_crew/subagent.py": [("spawn_available_agents", "subagent")],
+    "kiro_crew/subagent_parts/agent_policy.py": [("spawn_available_agents", "subagent")],
     # `list_apps` confirms a contributed command's agent was actually registered by
     # reading the app's materialized `<app>--<agent>.json` -- a user-writable dir, so
     # it goes through the hardened reader; a denial belongs to the app listing.
