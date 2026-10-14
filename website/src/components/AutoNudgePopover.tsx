@@ -12,7 +12,7 @@ import { DRAFT_SAVE_DEBOUNCE_MS } from '../utils/draftConstants'
 
 import { i18nT } from '../i18n/t'
 import { fmtTimeNumeric } from '../i18n/format'
-import { type AutoNudgeLoop, cycleText as loopCycleText, nextCycleText, judgeReading, judgeVerdictTime, loopFinished, PULL_REQUEST_WATCH_KINDS, AUTONUDGE_LOOPS_QUERY_KEY } from './autoNudgeLoop'
+import { type AutoNudgeLoop, cycleText as loopCycleText, nextCycleText, judgeReading, judgeVerdictTime, loopFinished, LOOP_STOP_REASON_KEYS, PULL_REQUEST_WATCH_KINDS, AUTONUDGE_LOOPS_QUERY_KEY } from './autoNudgeLoop'
 export type { AutoNudgeLoop } from './autoNudgeLoop'
 
 interface Props {
@@ -65,18 +65,6 @@ const defaultMsg = () => i18nT('components.autoNudgePopover.default_goal', {
   tasks: 'tasks.md',
   stopTool: 'autonudge_stop',
 })
-
-/** The paused line per persisted `stopped_reason` (`autoNudgeLoop.ts` lists
- *  the codes). An unlisted or absent reason renders the bare "Paused". */
-const PAUSED_STATUS_KEY: Record<string, string> = {
-  manual: 'components.autoNudgePopover.paused_manual',
-  autonudge_stop: 'components.autoNudgePopover.paused_agent',
-  cycle_cap: 'components.autoNudgePopover.paused_cycle_cap',
-  runtime_budget: 'components.autoNudgePopover.paused_runtime_budget',
-  approval_stalled: 'components.autoNudgePopover.paused_approval_stalled',
-  structural_terminal: 'components.autoNudgePopover.paused_last_cycle_failed',
-  session_start_failures: 'components.autoNudgePopover.paused_last_cycle_failed',
-}
 
 /** The three editable fields, as every write of the form sends them. */
 type LoopFields = { message: string; idle_secs: number; max_cycles: number }
@@ -607,8 +595,8 @@ export default function AutoNudgePopover({ slotKey, loop, open, onOpenChange, on
         ? countdownText
         : doneLine
           ? i18nT(doneLine.key)
-          : loop.stopped_reason && loop.stopped_reason in PAUSED_STATUS_KEY
-            ? i18nT(PAUSED_STATUS_KEY[loop.stopped_reason], { cycles: loop.cycle_count, max: loop.max_cycles })
+          : loop.stopped_reason && loop.stopped_reason in LOOP_STOP_REASON_KEYS
+            ? i18nT(LOOP_STOP_REASON_KEYS[loop.stopped_reason].popover, { cycles: loop.cycle_count, max: loop.max_cycles })
             : i18nT('components.autoNudgePopover.loop_paused')
     : ''
   /** The title names the state: the goal's cycle while running, Done once

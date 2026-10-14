@@ -155,10 +155,10 @@ describe('CrewProfilePanel Profile tab', () => {
     const details = screen.getByTestId('crew-profile-monitor')
     expect(details).toHaveAttribute('data-monitor-active', 'true')
     expect(details).toHaveTextContent('Active')
-    expect(details).toHaveTextContent('Bounded monitor')
+    expect(details).toHaveTextContent('Pull request')
     expect(details).toHaveTextContent('https://github.com/kirodotdev/KiroCrew/pull/42')
     expect(details).toHaveTextContent('5m')
-    expect(details).toHaveTextContent('5 / —')
+    expect(details).toHaveTextContent('5 / No limit')
     expect(details).toHaveTextContent('1h / 4h')
     expect(within(details).queryByRole('button')).toBeNull()
     expect(within(details).queryByRole('textbox')).toBeNull()
@@ -170,7 +170,6 @@ describe('CrewProfilePanel Profile tab', () => {
     setup({ automation: WORK_LEDGER_MONITOR })
     const details = screen.getByTestId('crew-profile-monitor')
     expect(details).toHaveAttribute('data-monitor-active', 'true')
-    expect(details).toHaveTextContent('Scheduled loop')
     expect(details).toHaveTextContent('Work ledger')
     expect(details).toHaveTextContent('10m')
     expect(details).toHaveTextContent('9 / 300')
@@ -178,11 +177,39 @@ describe('CrewProfilePanel Profile tab', () => {
   })
 
   it('keeps a stopped legacy loop readable without an active avatar', () => {
-    setup({ automation: { ...WORK_LEDGER_MONITOR, active: false, stoppedReason: 'cycle_cap' } })
+    setup({ automation: { ...WORK_LEDGER_MONITOR, active: false, cycleCount: 300, stoppedReason: 'cycle_cap' } })
     const details = screen.getByTestId('crew-profile-monitor')
     expect(details).toHaveAttribute('data-monitor-active', 'false')
     expect(details).toHaveTextContent('Inactive')
+    expect(details).toHaveTextContent('300 / 300')
     expect(details).toHaveTextContent('Cycle limit reached')
+  })
+
+  it('shows no monitor as inactive without inventing details', () => {
+    setup({ automation: null, monitorReadState: 'ready' })
+    const details = screen.getByTestId('crew-profile-monitor')
+    expect(details).toHaveTextContent('Inactive')
+    expect(details).toHaveTextContent('— / —')
+    expect(within(details).queryByRole('alert')).toBeNull()
+  })
+
+  it('shows loading as a check, not as an error', () => {
+    setup({ automation: null, monitorReadState: 'loading' })
+    const details = screen.getByTestId('crew-profile-monitor')
+    expect(details).toHaveTextContent('Checking monitor status…')
+    expect(within(details).queryByRole('alert')).toBeNull()
+  })
+
+  it('shows a stopped runtime budget as fully used', () => {
+    setup({ automation: { ...WORK_LEDGER_MONITOR, active: false, stoppedReason: 'runtime_budget' } })
+    expect(screen.getByTestId('crew-profile-monitor')).toHaveTextContent('24h / 24h')
+  })
+
+  it('uses a generic label for an unknown stop reason', () => {
+    setup({ automation: { ...WORK_LEDGER_MONITOR, active: false, stoppedReason: 'future_reason' } })
+    const details = screen.getByTestId('crew-profile-monitor')
+    expect(details).toHaveTextContent('Stopped')
+    expect(details).not.toHaveTextContent('future_reason')
   })
 
   it('fails closed when monitor state cannot be read', () => {

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
 import ErrorNotice from '../../components/ErrorNotice'
-import { intervalText } from '../../components/autoNudgeLoop'
+import { intervalText, LOOP_STOP_REASON_KEYS } from '../../components/autoNudgeLoop'
 import { fmtDateTime, fmtNumber } from '../../i18n/format'
 import { isAutomationActive, type AutomationRecord } from '../../monitoring/automation'
 
@@ -9,20 +9,6 @@ export type MonitorReadState = 'loading' | 'ready' | 'error'
 
 /** Stop reasons a failure caused, as opposed to a person, the agent or a limit. */
 const FAILURE_STOP_REASONS = new Set(['structural_terminal', 'session_start_failures'])
-
-function translatedStopReason(reason: string, t: ReturnType<typeof useTranslation>['t']): string {
-  switch (reason) {
-    case 'manual': return t('pages.membersPage.profile_monitor_reason_manual')
-    case 'autonudge_stop': return t('pages.membersPage.profile_monitor_reason_agent')
-    case 'cycle_cap': return t('pages.membersPage.profile_monitor_reason_cycles')
-    case 'runtime_budget': return t('pages.membersPage.profile_monitor_reason_runtime')
-    case 'approval_stalled': return t('pages.membersPage.profile_monitor_reason_approval')
-    case 'structural_terminal': return t('pages.membersPage.profile_monitor_reason_failed')
-    case 'session_start_failures': return t('pages.membersPage.profile_monitor_reason_start')
-    case 'monitor_terminal': return t('pages.membersPage.profile_monitor_reason_finished')
-    default: return reason
-  }
-}
 
 function stopReason(record: AutomationRecord | null): string {
   if (!record) return ''
@@ -32,17 +18,19 @@ function stopReason(record: AutomationRecord | null): string {
 
 function monitorType(record: AutomationRecord | null, t: ReturnType<typeof useTranslation>['t']): string {
   if (!record) return '—'
-  return record.kind === 'legacy_goal_loop'
-    ? t('pages.membersPage.profile_monitor_type_loop')
-    : t('pages.membersPage.profile_monitor_type_bounded')
+  const kind = record.monitorKind
+  if (kind === 'work-ledger') return t('pages.membersPage.profile_monitor_subject_ledger')
+  if (kind === 'gh-pr' || kind.endsWith('_pull_request') || kind === 'gitlab_merge_request') {
+    return t('pages.membersPage.profile_monitor_subject_pull_request')
+  }
+  if (record.kind === 'legacy_goal_loop' && !kind) {
+    return t('pages.membersPage.profile_monitor_subject_goal')
+  }
+  return kind || t('pages.membersPage.profile_monitor_type_bounded')
 }
 
-function monitorSubject(record: AutomationRecord | null, t: ReturnType<typeof useTranslation>['t']): string {
-  if (!record) return '—'
-  if (record.kind === 'structured_monitor') return record.target || '—'
-  if (record.monitorKind === 'work-ledger') return t('pages.membersPage.profile_monitor_subject_ledger')
-  if (record.monitorKind === 'gh-pr') return t('pages.membersPage.profile_monitor_subject_pull_request')
-  return record.monitorKind || t('pages.membersPage.profile_monitor_subject_goal')
+function monitorSubject(record: AutomationRecord | null): string {
+  return record?.kind === 'structured_monitor' ? record.target || '—' : '—'
 }
 
 function durationValue(seconds: number): string {
@@ -61,21 +49,26 @@ export default function CrewMonitorDetails({
   const { t } = useTranslation()
   const proven = readState === 'ready'
   const active = proven && isAutomationActive(automation)
-  const unavailable = !proven || (automation?.kind === 'structured_monitor' && !automation.actionable)
-  const status = unavailable
-    ? t('pages.membersPage.profile_monitor_unavailable')
-    : active
-      ? t('pages.membersPage.profile_monitor_active')
-      : t('pages.membersPage.profile_monitor_inactive')
+  const unsupported = automation?.kind === 'structured_monitor' && !automation.actionable
+  const readFailed = readState === 'error'
+  const status = readState === 'loading'
+    ? t('pages.membersPage.profile_monitor_loading')
+    : readFailed || unsupported
+      ? t('pages.membersPage.profile_monitor_unavailable_retry')
+      : active
+        ? t('pages.membersPage.profile_monitor_active')
+        : t('pages.membersPage.profile_monitor_inactive')
   const cadence = automation
     ? durationValue(automation.kind === 'legacy_goal_loop' ? automation.idleSecs : automation.cadenceSecs)
     : '—'
   const currentCycle = automation
     ? fmtNumber(automation.kind === 'legacy_goal_loop' ? automation.cycleCount : automation.usage.probes)
     : '—'
-  const maximumCycle = automation?.kind === 'legacy_goal_loop' && automation.maxCycles > 0
-    ? fmtNumber(automation.maxCycles)
-    : '—'
+  const maximumCycle = !automation
+    ? '—'
+    : automation.kind === 'legacy_goal_loop' && automation.maxCycles > 0
+      ? fmtNumber(automation.maxCycles)
+      : t('pages.membersPage.profile_monitor_no_limit')
   const createdAt = automation?.createdAt ?? 0
   const nextAt = automation?.kind === 'legacy_goal_loop'
     ? automation.nextDueAt ?? 0
@@ -86,26 +79,33 @@ export default function CrewMonitorDetails({
   const stoppedAt = automation?.kind === 'structured_monitor'
     ? automation.terminal?.stoppedAt ?? 0
     : 0
-  const runtimeUsed = createdAt > 0 && (active || stoppedAt > 0)
-    ? durationValue(Math.max(0, (active ? nowTs : stoppedAt) - createdAt))
-    : '—'
+  const reason = stopReason(automation)
+  const limitEndedRuntime = !active && reason === 'runtime_budget' && maxRuntime > 0
+  const runtimeUsed = limitEndedRuntime
+    ? durationValue(maxRuntime)
+    : createdAt > 0 && (active || stoppedAt > 0)
+      ? durationValue(Math.max(0, (active ? nowTs : stoppedAt) - createdAt))
+      : '—'
   const runtime = maxRuntime > 0
     ? t('pages.membersPage.profile_monitor_runtime_value', {
         used: runtimeUsed,
         max: durationValue(maxRuntime),
       })
     : runtimeUsed
-  const reason = stopReason(automation)
-  const reasonText = reason ? translatedStopReason(reason, t) : '—'
+  const reasonKey = LOOP_STOP_REASON_KEYS[reason]?.profile
+  const reasonText = !reason
+    ? '—'
+    : reasonKey
+      ? t(reasonKey)
+      : t('pages.membersPage.profile_monitor_reason_unknown')
   // A stop that a failure caused, or a read that failed, is an error and
   // renders through ErrorNotice; ordinary stops stay plain text.
   const reasonFailed = !active && FAILURE_STOP_REASONS.has(reason)
-  const readFailed = readState === 'error'
 
   const rows: Array<[string, string, boolean]> = [
     [t('pages.membersPage.profile_monitor_state'), status, readFailed],
     [t('pages.membersPage.profile_monitor_type'), monitorType(automation, t), false],
-    [t('pages.membersPage.profile_monitor_subject'), monitorSubject(automation, t), false],
+    [t('pages.membersPage.profile_monitor_subject'), monitorSubject(automation), false],
     [t('pages.membersPage.profile_monitor_frequency'), cadence, false],
     [t('pages.membersPage.profile_monitor_cycle'), t('pages.membersPage.profile_monitor_cycle_value', { current: currentCycle, max: maximumCycle }), false],
     [t('pages.membersPage.profile_monitor_started'), createdAt > 0 ? fmtDateTime(createdAt) : '—', false],

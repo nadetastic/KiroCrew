@@ -104,6 +104,46 @@ export const AUTONUDGE_LOOPS_QUERY_KEY = ['autonudge-loops'] as const
  *  refuses to revive it, so no surface may offer to. */
 export const FINISHED_STOP_REASONS = new Set(['stop_sentinel', 'monitor_terminal'])
 
+/** One stop-code table for every loop status surface. Each surface keeps copy
+ * sized for its own context, while the persisted-code mapping cannot drift. */
+export const LOOP_STOP_REASON_KEYS: Readonly<Record<string, {
+  popover: string
+  profile: string
+}>> = {
+  manual: {
+    popover: 'components.autoNudgePopover.paused_manual',
+    profile: 'pages.membersPage.profile_monitor_reason_manual',
+  },
+  autonudge_stop: {
+    popover: 'components.autoNudgePopover.paused_agent',
+    profile: 'pages.membersPage.profile_monitor_reason_agent',
+  },
+  cycle_cap: {
+    popover: 'components.autoNudgePopover.paused_cycle_cap',
+    profile: 'pages.membersPage.profile_monitor_reason_cycles',
+  },
+  runtime_budget: {
+    popover: 'components.autoNudgePopover.paused_runtime_budget',
+    profile: 'pages.membersPage.profile_monitor_reason_runtime',
+  },
+  approval_stalled: {
+    popover: 'components.autoNudgePopover.paused_approval_stalled',
+    profile: 'pages.membersPage.profile_monitor_reason_approval',
+  },
+  structural_terminal: {
+    popover: 'components.autoNudgePopover.paused_last_cycle_failed',
+    profile: 'pages.membersPage.profile_monitor_reason_failed',
+  },
+  session_start_failures: {
+    popover: 'components.autoNudgePopover.paused_last_cycle_failed',
+    profile: 'pages.membersPage.profile_monitor_reason_start',
+  },
+  monitor_terminal: {
+    popover: 'components.autoNudgePopover.loop_paused',
+    profile: 'pages.membersPage.profile_monitor_reason_finished',
+  },
+}
+
 /** Whether this inactive loop is finished (Done) rather than paused. An active
  *  loop is never finished, whatever its reason field still says. */
 export function loopFinished(loop: Pick<AutoNudgeLoop, 'active' | 'stopped_reason'> | null | undefined): boolean {

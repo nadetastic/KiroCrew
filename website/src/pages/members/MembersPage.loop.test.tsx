@@ -130,6 +130,6 @@ describe('MembersPage — on-watch loop indicator', () => {
     expect(details).toHaveAttribute('data-monitor-active', 'true')
     expect(details).toHaveTextContent('https://github.com/owner/repo/pull/123')
     expect(details).toHaveTextContent('5m')
-    expect(details).toHaveTextContent('5 / —')
+    expect(details).toHaveTextContent('5 / No limit')
   })
 })

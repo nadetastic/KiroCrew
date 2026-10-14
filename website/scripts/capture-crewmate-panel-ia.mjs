@@ -100,7 +100,7 @@ const MONITORS = [{
 
 const STOPPED_LOOP = {
   id: 'ledger-kiro', slot_key: 'member-kiro', message: '', created_ts: now - 1200,
-  idle_secs: 600, max_cycles: 300, cycle_count: 9, active: false,
+  idle_secs: 600, max_cycles: 300, cycle_count: 300, active: false,
   last_fire_ts: now - 600, next_due_ts: 0, max_runtime_secs: 86_400,
   stopped_reason: 'cycle_cap', monitor_outcome: '', monitor_kind: 'work-ledger',
 }
@@ -264,10 +264,10 @@ async function captureMonitorTransition() {
   await monitor.waitFor({ state: 'visible', timeout: 10000 })
   const monitorText = (await monitor.innerText()).replace(/\s+/g, ' ').trim()
   check('Profile shows active state', /State Active/.test(monitorText), monitorText)
-  check('Profile shows exact monitor type', /Type Bounded monitor/.test(monitorText), monitorText)
-  check('Profile shows exact watch subject', monitorText.includes('Watch https://github.com/kirodotdev/KiroCrew/pull/20026'), monitorText)
+  check('Profile shows exact monitor type', /Type Pull request/.test(monitorText), monitorText)
+  check('Profile shows exact monitor subject', monitorText.includes('Subject https://github.com/kirodotdev/KiroCrew/pull/20026'), monitorText)
   check('Profile shows exact frequency', /Every 5m/.test(monitorText), monitorText)
-  check('Profile shows exact cycle values', /Cycle 7 \/ —/.test(monitorText), monitorText)
+  check('Profile shows exact cycle values', /Cycle 7 \/ No limit/.test(monitorText), monitorText)
   check('Profile shows exact runtime values', /Runtime 1h \/ 4h/.test(monitorText), monitorText)
   check('Profile shows a real start time', !/Started —/.test(monitorText), monitorText)
   check('Profile shows a real next check', !/Next check —/.test(monitorText), monitorText)
@@ -277,11 +277,14 @@ async function captureMonitorTransition() {
   if (PROFILE_ONLY) {
     await context.close()
     await captureProfileVariant('stopped', '02c-card-profile-stopped-light.png', [
-      'State Inactive', 'Type Scheduled loop', 'Watch Work ledger',
-      'Every 10m', 'Cycle 9 / 300', 'Stopped because Cycle limit reached',
+      'State Inactive', 'Type Work ledger', 'Subject —',
+      'Every 10m', 'Cycle 300 / 300', 'Stopped because Cycle limit reached',
     ])
-    await captureProfileVariant('unavailable', '02d-card-profile-unavailable-light.png', [
-      'State Monitor status unavailable', 'Type —', 'Watch —', 'Cycle — / —',
+    await captureProfileVariant('none', '02d-card-profile-none-light.png', [
+      'State Inactive', 'Type —', 'Subject —', 'Cycle — / —',
+    ])
+    await captureProfileVariant('unavailable', '02e-card-profile-unavailable-light.png', [
+      'State Monitor status unavailable', 'Type —', 'Subject —', 'Cycle — / —',
     ])
     await captureMonitorTransition()
     await browser.close()
