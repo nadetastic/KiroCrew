@@ -96,6 +96,13 @@ describe('useArtifactLiveReload', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['artifact', 'flow-report'] })
   })
 
+  it('refetches on a body-less frame, the signal a write past the watch cap sends', async () => {
+    renderHook(() => useArtifactLiveReload('flow-report', '/repo/out/flow.html'))
+    emitChange('')
+    await pastDebounce()
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['artifact', 'flow-report'] })
+  })
+
   it('coalesces a burst of writes into one refetch', async () => {
     renderHook(() => useArtifactLiveReload('flow-report', '/repo/out/flow.html'))
 
