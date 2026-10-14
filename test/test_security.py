@@ -10636,7 +10636,11 @@ class TestPublishFloorNestedPayloads:
             # Decides rather than raising, and the top-level reading still holds.
             assert sec.is_denied("git push origin main") is not None
             assert sec.is_denied("rm -rf /") is not None
-            assert sec.is_denied("git push origin my-feature") is None
+            # The rm floor shares the walker and fails closed on its error, so it
+            # is left out here to isolate the publish floor's own degradation.
+            no_rm = [r.pattern for r in sec.BUILTIN_DENIED_RULES if "rm-rf" not in r.id]
+            assert sec.is_denied("git push origin my-feature", denied_regexes=no_rm) is None
+            assert sec.is_denied("git push origin my-feature") is not None
         finally:
             sec._nested_shell_payloads = original  # type: ignore[assignment]
 
