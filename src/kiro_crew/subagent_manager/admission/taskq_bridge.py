@@ -1199,15 +1199,44 @@ class _TaskqBridgeMixin(ManagerComponent):
             return False
         return store.advance(agent_id, state, generation=generation)
 
-    def taskq_fail(self, agent_id: str, reason: str) -> None:
-        """Terminal ``failed`` for a persisted row refused before it registered."""
+    def taskq_fail(self, agent_id: str, reason: str, *, generation: int | None = None) -> None:
+        """Terminal ``failed`` for a persisted row refused before it registered.
+
+        With *generation*, the write is fenced to that claim: a row another
+        owner has since moved on is refused as ``stale_result`` and left alone.
+        """
         from kiro_crew import taskq as _taskq
 
         store = self.taskq_store()
         if store is None:
             return
         self._post_store_write(
-            store, f"fail {agent_id}", store.finish, agent_id, _taskq.FAILED, error=reason
+            store,
+            f"fail {agent_id}",
+            store.finish,
+            agent_id,
+            _taskq.FAILED,
+            generation=generation,
+            error=reason,
+        )
+
+    @staticmethod
+    def _release_taken_start(store: "_taskq.TaskStore", agent_id: str, generation: int) -> bool:
+        """Give back a start the claimer took but did not carry to registration.
+
+        One generation-fenced ``starting -> retry_wait`` write with no due time,
+        so the row is claimable again at once. A row that has moved on (cancelled,
+        requeued, or settled by another owner) is refused by the fence or the
+        transition table and left alone. Safe on the writer thread.
+        """
+        from kiro_crew import taskq as _taskq
+
+        return store.transition(
+            agent_id,
+            _taskq.RETRY_WAIT,
+            generation=generation,
+            next_run_at=None,
+            detail={"released": "start not carried to registration"},
         )
 
     def taskq_settle(self, info: SubagentInfo, *, row_settled: bool = False) -> None:
@@ -1590,9 +1619,9 @@ class _TaskqBridgeMixin(ManagerComponent):
         Waiting means accepted with no run yet, the definition the overflow
         count uses: claimable rows, and ``admitted`` rows nothing has
         registered -- a claim the pump is still awaiting, or a retained one.
-        Stop all cancels exactly these ids, and the claimer's post-claim
-        re-read refuses a row cancelled here, so a claimed row never starts
-        after the stop.
+        Stop all cancels exactly these ids, and the claimer's generation-fenced
+        ``admitted -> starting`` write is refused for a row cancelled here, so a
+        claimed row never starts after the stop.
         """
         from kiro_crew import taskq as _taskq
 
@@ -2372,8 +2401,10 @@ class _TaskqBridgeMixin(ManagerComponent):
 
         ``allow_admitted=False`` refuses a row that has been CLAIMED but not started.
         Stop-all leaves it True: the user pressed Stop, and a claimed-not-started row is
-        work they asked to end; the claimer's post-claim re-read (``claim_and_start``)
-        refuses a row cancelled here. A parent-end teardown passes False: a row in that
+        work they asked to end; the claimer's ``admitted -> starting`` compare-and-set
+        (``claim_and_start``) is refused for a row cancelled here, and a row it has
+        already moved is ``starting``, which this path leaves to the live reap. A
+        parent-end teardown passes False: a row in that
         window may be carrying a decision a person made (a spawn approval is the visible
         case), which a teardown has no standing to revoke on their behalf. Refusing
         leaves the row to the incarnation that owns it.
@@ -2384,8 +2415,8 @@ class _TaskqBridgeMixin(ManagerComponent):
         so a row a drain claimed and started in between answers None here and the
         caller falls through to the live reap -- never a ``cancelled`` row with a
         running spawn under it. A row claimed but not started (``admitted``) is
-        still this path's: the spawn re-reads the state before it registers and
-        stops there.
+        still this path's: the spawn's own start write is fenced on the
+        generation this cancel bumps, so it is refused and stops there.
 
         The cancel is deliberately NOT fenced on the read's generation. A claim, a
         requeue or a wake can bump the generation while the row stays unstarted

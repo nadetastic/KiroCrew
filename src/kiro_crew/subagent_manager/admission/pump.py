@@ -47,6 +47,15 @@ class _PumpMixin(ManagerComponent):
 
         async def taskq_child_registered_async(self, info: "SubagentInfo") -> None: ...
 
+        def taskq_fail(
+            self, agent_id: str, reason: str, *, generation: int | None = None
+        ) -> None: ...
+
+        @staticmethod
+        def _release_taken_start(
+            store: "_taskq.TaskStore", agent_id: str, generation: int
+        ) -> bool: ...
+
         def _record_crew_log_spawn_started(self, info: "SubagentInfo") -> None: ...
 
         def _record_crew_log_spawn_approval_requested(
@@ -520,21 +529,43 @@ class _PumpMixin(ManagerComponent):
         stop_params: "Mapping[str, Any] | None" = None,
         retained_generation: int | None = None,
     ) -> "SubagentInfo | None":
-        """Claim a reserved row, settle its durable authority, then register it.
+        """Claim a reserved row, take its start in the store, then register it.
 
-        Between the claim and the registration the row is re-read (still
-        ``admitted``, same generation, our lease) and the loop is checked for a
-        stop recorded meanwhile; either one failing refuses the start. A
-        failure before the claim leaves the row queued and releases the
-        reservation. A store outage after the claim retains the admitted
-        generation and reservation for a later pump pass. Registration consumes
-        the reservation; every durably refused outcome releases it.
+        Between the claim and the registration the loop is checked for a stop
+        recorded meanwhile, then the store moves the row ``admitted ->
+        starting`` under the claim's generation in one compare-and-set
+        (``taskq_claim_start``). The store decides whether the claimer still
+        owns the row: a cancel that committed first, by any path, bumped the
+        generation and the write is refused; one that commits later finds a
+        ``starting`` row no unstarted-row cancel touches. Either refusal
+        refuses the start. A failure before the claim leaves the row queued
+        and releases the reservation. A store outage after the claim retains
+        the admitted generation and reservation for a later pump pass.
+        Registration consumes the reservation; every durably refused outcome
+        releases it. A start the store took whose registration raised is
+        ended ``failed`` under its generation; one the claimer neither
+        registers nor sees raise (a re-entry that returns without registering,
+        or a claimer cancelled while it awaits the shielded start write) is
+        released by one generation-fenced ``starting -> retry_wait`` write
+        (``_release_untaken_registration``). An unavailable release retains
+        the generation and reservation for the same retry path as an
+        unavailable start write. A cancelled claimer propagates its cancel;
+        during shutdown it leaves the logged row to the boot reconcile.
+
+        While the compare-and-set is in flight and until the row is
+        registered or refused, ``_starting_claims`` holds the row's answer: a
+        single ``cancel`` that finds the row ``starting`` with no record yet
+        joins it and then reaps the run it registered (``cancel_impl``).
         """
         store = self.taskq_store()
         assert store is not None
         claim_will_register = False
         claim_retained = False
+        start_taken: bool | None = False
+        generation = 0
         result: Any = None
+        starting: "asyncio.Future[bool] | None" = None
+        reentry_returned = False
         try:
             claimed = (
                 (retained_generation, True, "")
@@ -542,71 +573,75 @@ class _PumpMixin(ManagerComponent):
                 else await store.run(self.taskq_claim, point.agent_id)
             )
             generation, proceed, _reason = claimed
-            if proceed:
+            # Generation 0 is a row the store never saw (``taskq_claim``),
+            # which has no row to move and keeps its legacy start.
+            if proceed and generation:
                 import asyncio as _asyncio
 
                 from kiro_crew import taskq as _taskq
 
-                # Every claim the store took re-reads its row before it
-                # registers. The claim was a writer-thread hop, and a stop that
-                # ran while the pump waited on it (Stop all's
-                # ``taskq_cancel_queued`` accepts an ``admitted`` row) has
-                # cancelled the row by now: registering anyway starts work the
-                # parent was told had stopped. Generation 0 is a row the store
-                # never saw (``taskq_claim``), which has nothing to re-read and
-                # keeps its legacy start.
-                try:
-                    still_current = (
-                        await store.run(
-                            self.taskq_claim_still_current,
+                if self._stopped_while_claimed(point.agent_id):
+                    # A stop ran while the claim was in flight and installed
+                    # its record synchronously; its report settles the row,
+                    # whether or not its own store cancel has landed yet (a
+                    # claim retained across an outage). The row is not ours
+                    # to start, and the store is not asked.
+                    claimed = (generation, False, self.CLAIM_REFUSED)
+                else:
+                    starting = _asyncio.get_running_loop().create_future()
+                    self._manager.__dict__.setdefault("_starting_claims", {})[
+                        point.agent_id
+                    ] = starting
+                    job = _asyncio.ensure_future(
+                        store.run(self.taskq_claim_start, point.agent_id, generation)
+                    )
+                    try:
+                        start_taken = await _asyncio.shield(job)
+                    except _taskq.TaskStoreUnavailable:
+                        start_taken = None
+                        _glue_logger.warning(
+                            "taskq: post-claim start of %s failed; retaining generation %d",
                             point.agent_id,
                             generation,
+                            exc_info=True,
                         )
-                        if generation
-                        else True
-                    )
-                    # A Stop all batch whose cancel of this row was queued
-                    # AFTER that re-read answers it stale, and installs no
-                    # record until its answer comes back. Wait for that answer,
-                    # then re-read behind the cancel: the start is decided only
-                    # by a read the cancel cannot have overtaken.
-                    while still_current and generation:
-                        batched = self._batched_stop_of(point.agent_id)
-                        if batched is None:
-                            break
-                        await _asyncio.shield(batched)
-                        still_current = await store.run(
-                            self.taskq_claim_still_current,
-                            point.agent_id,
-                            generation,
-                        )
-                except _taskq.TaskStoreUnavailable:
-                    still_current = None
-                    _glue_logger.warning(
-                        "taskq: post-claim settlement of %s failed; retaining generation %d",
-                        point.agent_id,
-                        generation,
-                        exc_info=True,
-                    )
-                if still_current is None:
-                    self._retain_claim(point, generation, reenter, stop_params)
-                    claim_retained = True
-                    if retained_generation is None:
-                        result = reenter((generation, False, self.CLAIM_RETAINED))
-                    return result
-                if not still_current:
-                    claimed = (generation, False, self.CLAIM_REFUSED)
-                elif self._stopped_while_claimed(point.agent_id):
-                    # The re-read answered before a stop landed, and the stop
-                    # ran before this coroutine resumed. A queued stop installs
-                    # its record synchronously, and a batched one's answer was
-                    # waited for above, so the loop's own state is the last
-                    # word: the row is not ours to start.
-                    claimed = (generation, False, self.CLAIM_REFUSED)
-            # No await between a successful final durable check and
-            # registration: cancellation cannot interleave after the
-            # revalidation a registered start relies on. A refused claim may
-            # await its terminal store write because it never registers.
+                    except _asyncio.CancelledError:
+                        # Cancelled (a shutdown, a caller whose client went
+                        # away) while the write was in flight. The shielded
+                        # write still runs to its answer; a start it took has
+                        # nothing registering it, so it is released before the
+                        # cancel propagates, and a joined cancel learns the
+                        # answer only after that release.
+                        try:
+                            taken = await job
+                        except _taskq.TaskStoreUnavailable:
+                            taken = False
+                        if taken:
+                            released = await self._release_untaken_registration(
+                                store, point.agent_id, generation
+                            )
+                            if not released and not self._manager._shutting_down:
+                                self._retain_claim(point, generation, reenter, stop_params)
+                                claim_retained = True
+                                self._unmark_dispatching(
+                                    {"_preassigned_id": point.agent_id}, retained=True
+                                )
+                        raise
+                    if start_taken is None:
+                        self._retain_claim(point, generation, reenter, stop_params)
+                        claim_retained = True
+                        if retained_generation is None:
+                            result = reenter((generation, False, self.CLAIM_RETAINED))
+                        return result
+                    if not start_taken:
+                        # The row moved under the claim: cancelled, requeued by
+                        # a reconcile, or ended. Whoever moved it wrote its
+                        # state; nothing here starts or writes.
+                        claimed = (generation, False, self.CLAIM_REFUSED)
+            # No await between a taken start and registration: nothing can
+            # interleave after the write a registered start relies on. A
+            # refused claim may await its terminal store write because it
+            # never registers.
             claim_will_register = bool(claimed[1])
             if not claim_will_register:
                 # The claim did not take the row (store unavailable, refused,
@@ -618,6 +653,17 @@ class _PumpMixin(ManagerComponent):
                 self._manager._dispatching_ids.discard(point.agent_id)
                 self._manager._dispatch_window_ids.discard(point.agent_id)
             result = reenter(claimed)
+            reentry_returned = True
+            if start_taken and not (
+                claim_will_register and point.agent_id in self._manager._agents
+            ):
+                # The re-entry returned without registering the taken start
+                # (gateway admission closed meanwhile, for one): the accepted
+                # row goes back to a claimable state rather than ending.
+                if not await self._release_untaken_registration(store, point.agent_id, generation):
+                    self._retain_claim(point, generation, reenter, stop_params)
+                    claim_retained = True
+                    self._unmark_dispatching({"_preassigned_id": point.agent_id}, retained=True)
         finally:
             # Queued-stop reporting temporarily installs a synthetic terminal
             # record under this id. Only a still-proceeding claim that really
@@ -626,6 +672,21 @@ class _PumpMixin(ManagerComponent):
             registered = claim_will_register and point.agent_id in self._manager._agents
             if not registered and not claim_retained:
                 self.release_reservation(point.agent_id)
+            if start_taken and not registered and not reentry_returned:
+                # The store moved the row to ``starting`` for a registration
+                # that raised. Nothing runs under it, so it ends ``failed``
+                # under the claim's generation, the way every other refusal
+                # after the claim ends in a terminal write; left ``starting``
+                # it would read as a live run no sweep ever reaps.
+                self.taskq_fail(
+                    point.agent_id,
+                    "spawn registration failed after the claim",
+                    generation=generation,
+                )
+            if starting is not None:
+                self._manager.__dict__.get("_starting_claims", {}).pop(point.agent_id, None)
+                if not starting.done():
+                    starting.set_result(registered)
             if registered:
                 # Every registered start re-publishes the parent's queued depth.
                 # A direct spawn owes nothing to the count, so its emit reports
@@ -639,10 +700,35 @@ class _PumpMixin(ManagerComponent):
         assert not isinstance(result, ClaimPoint)
         return result
 
-    def _batched_stop_of(self, agent_id: str) -> "asyncio.Future[Any] | None":
-        """The answer a Stop all batch owes *agent_id*, while its cancel is in
-        flight (``cancellation._stop_queued`` files it), else ``None``."""
-        return self._manager.__dict__.get("_batched_stops", {}).get(agent_id)
+    async def _release_untaken_registration(
+        self, store: "_taskq.TaskStore", agent_id: str, generation: int
+    ) -> bool:
+        """Release a taken start nothing registered, on the writer thread.
+
+        Return True for a committed release or a row that moved on. A store
+        outage is logged and returns False: the caller retains the claim for
+        retry, unless shutdown leaves it to the boot reconcile.
+        """
+        from kiro_crew import taskq as _taskq
+
+        try:
+            await store.run(self._release_taken_start, store, agent_id, generation)
+        except _taskq.TaskStoreUnavailable:
+            _glue_logger.warning(
+                "taskq: release of the untaken start of %s (generation %d) failed",
+                agent_id,
+                generation,
+                exc_info=True,
+            )
+            return False
+        return True
+
+    def starting_claim_of(self, agent_id: str) -> "asyncio.Future[bool] | None":
+        """The answer ``claim_and_start`` owes *agent_id* while its start is in
+        flight: filed before the ``admitted -> starting`` write is posted,
+        resolved ``True`` once the row is registered and ``False`` when it was
+        refused or retained. ``None`` when no start of the row is in flight."""
+        return self._manager.__dict__.get("_starting_claims", {}).get(agent_id)
 
     def _stopped_while_claimed(self, agent_id: str) -> bool:
         """Whether a stop was recorded for *agent_id* while its claim was in flight.
@@ -1557,30 +1643,36 @@ class _PumpMixin(ManagerComponent):
         _glue_logger.info("taskq: %s not started, store state is %s", agent_id, state)
         return (0, False, self.CLAIM_REFUSED)
 
-    def taskq_claim_still_current(self, agent_id: str, generation: int) -> bool | None:
-        """Whether this dispatcher still owns the admitted claim generation.
+    def taskq_claim_start(self, agent_id: str, generation: int) -> bool:
+        """Move the claimed row ``admitted -> starting`` under *generation*: the
+        one compare-and-set that decides whether this dispatcher still owns it.
 
-        ``None`` means the store could not answer and makes re-entry retry rather
-        than registering work whose durable lease cannot be proved. Called only
-        through :meth:`TaskStore.run`, immediately before loop registration.
+        ``TaskStore.transition`` tests the state and the generation in the
+        same ``UPDATE`` the write rides on, so a cancel that committed first
+        (every cancel bumps the generation) or a reconcile that requeued the
+        row refuses it here, as ``stale_result`` / ``rejected_transition`` in
+        the row's events, and a cancel that commits later meets a ``starting``
+        row that no unstarted-row cancel accepts. The lease needs no separate
+        test: an ``admitted`` row at the claim's own generation is that claim.
+        A refused transition also succeeds for our own ``starting`` row at
+        that generation and lease: only this claim can produce it, since
+        another owner bumps the generation. This makes a retained claim's
+        start idempotent when its release cannot reach the store.
+        Called only through :meth:`TaskStore.run`, immediately before loop
+        registration; a store that cannot answer raises
+        ``TaskStoreUnavailable`` and the caller retains the claim.
         """
         store = self.taskq_store()
         if store is None:
             return False
         from kiro_crew import taskq as _taskq
 
-        try:
-            rec = store.get(agent_id)
-        except _taskq.TaskStoreUnavailable:
-            _glue_logger.warning(
-                "taskq: claim revalidation of %s failed",
-                agent_id,
-                exc_info=True,
-            )
-            return None
-        return bool(
+        if store.transition(agent_id, _taskq.STARTING, generation=generation):
+            return True
+        rec = store.get(agent_id)
+        return (
             rec is not None
-            and rec.state == _taskq.ADMITTED
+            and rec.state == _taskq.STARTING
             and rec.generation == generation
             and rec.lease_owner == store.incarnation
         )
