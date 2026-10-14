@@ -30,7 +30,13 @@ from typing import Any
 
 from kiro_crew import pinned_fs, platform_compat
 from kiro_crew.acp import session_mcp
-from kiro_crew.agent_discovery import SCOPE_PROJECT, _read_agent_spec, list_agents
+from kiro_crew.agent_discovery import (
+    SCOPE_PROJECT,
+    _read_agent_spec,
+    can_inherit_skills,
+    inherited_skill_globs,
+    list_agents,
+)
 from kiro_crew.agent_spec_format import (
     NATIVE_SKILL_ALIAS_PREFIX,
     SKILL_VIEW_PROJECTION_CEILING,
@@ -1923,9 +1929,10 @@ def _inheritance_preference(
 def inherits_default_resources(work_dir: str | os.PathLike[str] | None) -> bool:
     """Whether a custom agent started in *work_dir* inherits kiro-cli's default resources.
 
-    Those defaults are global and workspace steering plus ``AGENTS.md``. This is
-    the read-only twin of the decision :func:`prepare_native_skill_projection`
-    makes, for callers that must mirror what the native agent loads. Settings
+    Those defaults are global and workspace steering, ``AGENTS.md`` and the
+    global and workspace skill trees. This is the read-only twin of the decision
+    :func:`prepare_native_skill_projection` makes, for callers that must mirror
+    what the native agent loads. Settings
     that cannot be read keep inheritance, which is how those callers behaved
     before they asked.
     """
@@ -3743,6 +3750,10 @@ def prepare_native_skill_projection(
     errors: dict[str, str] = {}
     search_agents: set[str] = set()
     display_sizes: dict[str, tuple[int, str]] = {}
+    # The skill trees an unmapped custom agent inherits. Crew supplies them through
+    # its bounded directory, so such an agent needs the same search tool a mapped
+    # one gets -- see agent_discovery.inherited_skill_globs.
+    inherited_globs = inherited_skill_globs(work_dir, kiro_home_dir=kiro_home())
     for agent in list_agents(project_dir=str(work_dir)):
         if not agent.filename:
             continue
@@ -3772,8 +3783,11 @@ def prepare_native_skill_projection(
         view["resources"] = [
             r for r in resources if not (isinstance(r, str) and r.startswith("skill://"))
         ]
-        needs_search = agent.name == "kirocrew" or any(
-            isinstance(r, str) and r.startswith("skill://") for r in resources
+        mapped = any(isinstance(r, str) and r.startswith("skill://") for r in resources)
+        needs_search = (
+            agent.name == "kirocrew"
+            or mapped
+            or (bool(inherited_globs) and can_inherit_skills(spec))
         )
         if needs_search:
             excluded = view.get("excludedTools", [])

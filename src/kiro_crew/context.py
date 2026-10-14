@@ -1580,14 +1580,17 @@ def _skills_injection_plan(
 
     THE single source of truth for the agent-scoping rule, shared by the
     session-start injection and the post-compaction re-injection. Mapped agents
-    receive the same scoped directory on either backend; an unmapped agent
-    gets the startup directory only when it is the default one.
+    receive the same scoped directory on either backend; an unmapped default
+    agent gets the startup directory, and an unmapped custom agent gets the
+    skill trees it inherits from kiro-cli unless its workspace opted out.
 
     Deliberately one function rather than the same expression written twice: a
     hand-copied second gate is exactly what let the re-injection path ship
     without scoping, handing a mapped agent the catalog its mapping excludes.
     """
-    globs = agent_skill_globs(agent, project_dir=project_dir) if agent else []
+    globs = (
+        agent_skill_globs(agent, project_dir=project_dir, inherit_defaults=True) if agent else []
+    )
     is_custom = bool(agent) and agent != "kirocrew"
     return (bool(globs) or not is_custom), globs
 

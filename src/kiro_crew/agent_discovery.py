@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import fnmatch
 import functools
 import hashlib
 import logging
@@ -286,6 +287,8 @@ def is_internal_agent_spec(info: object) -> bool:
 
 
 SKILL_URI_PREFIX = "skill://"
+#: The Crew tool that loads a skill a bounded directory lists.
+_SKILL_SEARCH_TOOL = "@kirocrew-core/skill_search"
 
 # Kiro Crew-only spec convention, predating ``.kiro/agents/`` and still used by
 # projects driven from Slack. kiro-cli does NOT read this location, so a name
@@ -1508,12 +1511,71 @@ class SkillScopeResolutionError(ValueError):
     """The bound agent has an unavailable skill scope."""
 
 
+def can_inherit_skills(spec: dict[str, Any]) -> bool:
+    """Whether an unmapped custom agent's spec can take its inherited skill trees.
+
+    Crew delivers inherited skills through ``skill_search``, so a spec that
+    declares ``tools: []`` (the zero-tool contract) or excludes or disables that
+    tool gets none: adding it would change what its author allowed. A mapped
+    agent that does the same is refused with the reason; an unmapped one keeps
+    the spawn it had and simply gets no skills.
+    """
+    tools = spec.get("tools")
+    if isinstance(tools, list) and not tools:
+        return False
+    excluded = spec.get("excludedTools", [])
+    if isinstance(excluded, list) and any(
+        isinstance(t, str) and (t == "@kirocrew-core" or fnmatch.fnmatchcase(_SKILL_SEARCH_TOOL, t))
+        for t in excluded
+    ):
+        return False
+    servers = spec.get("mcpServers", {})
+    if not isinstance(servers, dict):
+        return False
+    core = servers.get("kirocrew-core")
+    if core is None:
+        return True
+    if not isinstance(core, dict) or core.get("disabled", False) is not False:
+        return False
+    disabled_tools = core.get("disabledTools", [])
+    return isinstance(disabled_tools, list) and "skill_search" not in disabled_tools
+
+
+def inherited_skill_globs(
+    project_dir: str | Path | None, *, kiro_home_dir: Path | None = None
+) -> list[str]:
+    """The skills a custom agent inherits from kiro-cli's default resources.
+
+    Since kiro-cli 2.7 a custom agent inherits the default skill trees,
+    ``~/.kiro/skills`` and the workspace's ``.kiro/skills``, unless
+    ``chat.disableInheritingDefaultResources`` turns that off. Native launches
+    turn it off to bound the startup catalog (``acp/skill_projection.py``), so an
+    agent with no ``skill://`` entry of its own would get no skills at all. Crew
+    supplies those trees instead, through the same bounded directory and
+    ``skill_search`` a mapped agent uses. Returns ``[]`` when the workspace opted
+    out of inheritance, and leaves out a tree that does not exist. *kiro_home_dir*
+    is the kiro-cli home the caller already resolved; it defaults to
+    :func:`kiro_crew.config.paths.kiro_home`.
+    """
+    from kiro_crew.agent_sdk.drivers import acp as acp_driver
+    from kiro_crew.config import paths
+
+    if not acp_driver.inherits_default_resources(project_dir):
+        return []
+    home = kiro_home_dir if kiro_home_dir is not None else paths.kiro_home()
+    roots = [home / "skills"]
+    if project_dir:
+        roots.append(Path(project_dir) / ".kiro" / "skills")
+    return [str(root / "*" / "SKILL.md") for root in roots if root.is_dir()]
+
+
 def agent_skill_globs(
     agent: str,
     agents_dir: Path | None = None,
     *,
     project_dir: str | Path | None = None,
     strict: bool = False,
+    inherit_defaults: bool = False,
 ) -> list[str]:
     """Return fnmatch globs for the skills mapped to *agent*, or ``[]``.
 
@@ -1522,6 +1584,9 @@ def agent_skill_globs(
     Listing callers are best-effort: an unreadable, invalid, or sensitive-path
     agent file yields ``[]``. Session callers use ``strict=True`` so a missing
     custom template cannot silently widen its scope to the global catalog.
+    Session callers also pass ``inherit_defaults=True``: a custom agent whose
+    spec resolves with no ``skill://`` entry then gets
+    :func:`inherited_skill_globs` rather than ``[]``.
     Resolved from the :func:`parsed_agent_specs` snapshot when no project is supplied.
     """
     if not agent:
@@ -1543,18 +1608,30 @@ def agent_skill_globs(
         data = _read_agent_spec(path, operation="agent_skill_globs", source="unknown")
         if strict and data is None:
             raise SkillScopeResolutionError(f"Cannot read skill scope for agent {agent!r}")
-        return [
+        globs = [
             g
             for uri in skill_resource_uris(data or {})
             if (g := expand_skill_uri(uri, path, project_dir=project_dir))
         ]
+        if (
+            not globs
+            and inherit_defaults
+            and agent != "kirocrew"
+            and data is not None
+            and can_inherit_skills(data)
+        ):
+            return inherited_skill_globs(project_dir)
+        return globs
     # ``f`` is the ORIGINAL path: ``f.stem`` and ``expand_skill_uri`` below
     # must see it so a symlinked spec's relative globs stay anchored where
     # the symlink lives.
     for data, f in parsed_agent_specs(agents_dir, operation="agent_skill_globs", source="unknown"):
         if data.get("name") != agent and f.stem != agent:
             continue
-        return [g for uri in skill_resource_uris(data) if (g := expand_skill_uri(uri, f))]
+        globs = [g for uri in skill_resource_uris(data) if (g := expand_skill_uri(uri, f))]
+        if not globs and inherit_defaults and agent != "kirocrew" and can_inherit_skills(data):
+            return inherited_skill_globs(project_dir)
+        return globs
     if strict and agent != "kirocrew":
         raise SkillScopeResolutionError(f"Cannot resolve skill scope for agent {agent!r}")
     return []
@@ -1569,7 +1646,9 @@ def session_skill_globs(
 
     execution = read_session_execution(session_key) if session_key else None
     template = execution.template_id if execution and execution.template_id else fallback_agent
-    mapped = agent_skill_globs(template, project_dir=project_dir, strict=True)
+    mapped = agent_skill_globs(
+        template, project_dir=project_dir, strict=True, inherit_defaults=True
+    )
     return None if template == "kirocrew" and not mapped else mapped
 
 

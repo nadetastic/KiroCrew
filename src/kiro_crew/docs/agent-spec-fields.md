@@ -557,8 +557,16 @@ mapping, not the backend:
 |---|---|---|---|
 | `kirocrew` | none | whole catalog, injected by Crew | whole catalog, injected by Crew |
 | `kirocrew` | mapped | mapped set only, injected by Crew | mapped set only, injected by Crew |
-| custom | none | nothing — the agent brings its own | nothing |
+| custom | none | inherited skill trees, injected by Crew | inherited skill trees, injected by Crew |
 | custom | mapped | mapped set only, injected by Crew | mapped set only, injected by Crew |
+
+The inherited trees are what kiro-cli gives a custom agent by default:
+`~/.kiro/skills` and the workspace's `.kiro/skills`
+(`agent_discovery.inherited_skill_globs`). Crew turns kiro-cli's own inheritance
+off on native launches to bound the startup catalog, so it supplies these trees
+itself, and the native view gets `skill_search` to load them. A workspace that
+sets `chat.disableInheritingDefaultResources` gets none, and so does an agent that
+excludes or disables `skill_search`.
 
 Every spec Kiro Crew generates for itself is a `custom` row, so a generated agent
 whose prompt names a skill must MAP that skill — the row above is why, and
