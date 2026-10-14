@@ -12171,7 +12171,13 @@
       "dismiss_until_next_visit": "Bis zum nächsten Besuch ausblenden",
       "could_not_check_restored_tabs": "Es konnte nicht geprüft werden, ob nach dem letzten Neustart alle Tabs wiederhergestellt wurden.",
       "could_not_start_fresh_session": "Neue Sitzung konnte nicht gestartet werden",
-      "delivery_unconfirmed_option": "Zustellung nicht bestätigt — prüfe den Verlauf und tippe den Vorschlag erneut an, falls er fehlt."
+      "delivery_unconfirmed_option": "Zustellung nicht bestätigt — prüfe den Verlauf und tippe den Vorschlag erneut an, falls er fehlt.",
+      "comments_pending_reconnect": "Deine Kommentare stehen noch aus. Der Chat wird neu verbunden — drück gleich erneut auf Alle senden.",
+      "delivery_unconfirmed_comments": "Zustellung nicht bestätigt — wenn deine Kommentare nicht in der unten stehenden Unterhaltung stehen, drück Alle senden.",
+      "comments_sent_one": "{{count}} Kommentar gesendet",
+      "comments_refused": "{{name}} hat diese Kommentare nicht erhalten — drück auf Alle senden, um sie erneut zu senden.",
+      "comments_sent_other": "{{count}} Kommentare gesendet",
+      "comments_unknown": "Kommentare gesendet — prüf die unten stehende Unterhaltung, ob sie angekommen sind."
     },
     "chatSidebar": {
       "1_skipped_currently_selected": "(1 übersprungen — aktuell ausgewählt)",

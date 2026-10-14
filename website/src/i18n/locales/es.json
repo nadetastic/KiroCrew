@@ -12351,7 +12351,14 @@
       "dismiss_until_next_visit": "Ocultar hasta la próxima visita",
       "could_not_check_restored_tabs": "No se pudo comprobar si todas las pestañas se restauraron tras el último reinicio.",
       "could_not_start_fresh_session": "No se pudo iniciar una sesión nueva",
-      "delivery_unconfirmed_option": "Entrega sin confirmar: revisa la conversación y vuelve a tocar la sugerencia si no aparece."
+      "delivery_unconfirmed_option": "Entrega sin confirmar: revisa la conversación y vuelve a tocar la sugerencia si no aparece.",
+      "comments_pending_reconnect": "Tus comentarios siguen pendientes. El chat se está reconectando — pulsa de nuevo Enviar todo en un momento.",
+      "delivery_unconfirmed_comments": "Entrega sin confirmar — si tus comentarios no están en la conversación de abajo, pulsa Enviar todo de nuevo.",
+      "comments_sent_one": "{{count}} comentario enviado",
+      "comments_refused": "{{name}} no ha recibido estos comentarios — pulsa Enviar todo para enviarlos de nuevo.",
+      "comments_sent_other": "{{count}} comentarios enviados",
+      "comments_sent_many": "{{count}} comentarios enviados",
+      "comments_unknown": "Comentarios enviados — comprueba la conversación de abajo para confirmar que llegaron."
     },
     "chatSidebar": {
       "1_skipped_currently_selected": "(1 omitida — seleccionada actualmente)",

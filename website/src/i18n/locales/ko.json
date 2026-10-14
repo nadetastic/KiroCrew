@@ -11991,7 +11991,12 @@
       "dismiss_until_next_visit": "다음 방문 전까지 숨기기",
       "could_not_check_restored_tabs": "마지막 재시작 후 모든 탭이 복원되었는지 확인하지 못했습니다.",
       "could_not_start_fresh_session": "새 세션을 시작할 수 없습니다",
-      "delivery_unconfirmed_option": "전송이 확인되지 않았습니다 — 대화 기록을 확인한 뒤, 보이지 않으면 제안을 다시 탭하세요."
+      "delivery_unconfirmed_option": "전송이 확인되지 않았습니다 — 대화 기록을 확인한 뒤, 보이지 않으면 제안을 다시 탭하세요.",
+      "comments_pending_reconnect": "댓글이 아직 전송되지 않았습니다. 채팅이 재연결 중입니다 — 잠시 후 “모두 제출”을 다시 누르세요.",
+      "delivery_unconfirmed_comments": "전송이 확인되지 않았습니다 — 아래 대화에 댓글이 없으면 “모두 제출”을 다시 누르세요.",
+      "comments_refused": "{{name}}이(가) 이 댓글들을 받지 못했습니다 — 다시 보내려면 “모두 제출”을 누르세요.",
+      "comments_sent_other": "{{count}}개의 댓글이 전송되었습니다",
+      "comments_unknown": "댓글이 전송되었습니다 — 아래 대화에서 도착했는지 확인하세요."
     },
     "chatSidebar": {
       "1_skipped_currently_selected": "(1개 건너뜀 — 현재 선택됨)",

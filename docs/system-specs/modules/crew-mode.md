@@ -2366,6 +2366,27 @@ nowhere at all when the shell swallows the popup. The split-view pane still pass
 for the reason #3300 records (its dock is `activeSlot`-keyed while pane focus
 is not).
 
+**A document in the member's side panel takes inline comments.** The page
+hands the panel `onSubmitComments` and `connected`, as the chat page does, so a
+markdown file tab offers the selection comment composer and the comment list,
+and an artifact tab its submit-to-chat bar (#20081). Submit sends the batch the
+panel formats into the DM through the chat-core transport (`sendTurn`),
+carrying the composer's busy-send decision for that slot (`slotBusySteer`).
+The target is `confirmedSlot`, read at the press: the slot the document
+actions stamp every tab with, on a strip bucketed per member, so a batch
+reaches only the crewmate the panel belongs to. The page draws no optimistic
+row for the batch. Every outcome shows feedback outside the DM transcript --
+the crewmate's DM stays messages-only per `docs/decisions/2026-10-09-crewmate-chat-draws-messages-only.md`.
+Failure paths use `setActionError` (ErrorNotice banner); success paths use
+`setActionInfo` (neutral status text, role=status, auto-dismisses after 5 s):
+if the slot is absent (thread reconnecting) `setActionError` shows a reconnect
+banner; `refused` shows a user-friendly notice naming the crewmate (the
+server's internal reason is logged, never surfaced); `response-late` and
+`transport-error` both show a delivery-unconfirmed notice; `dispatched` and
+`queued` show "N comments sent" via `setActionInfo`; `unknown` (body
+unreadable) shows a neutral "Comments handed to the chat." via `setActionInfo`
+and clears the comments with no retry.
+
 ## Selection: the `select_crew` contract
 
 Discovery importing a provider template as a configured member does not rebind

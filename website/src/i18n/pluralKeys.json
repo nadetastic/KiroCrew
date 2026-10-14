@@ -163,6 +163,7 @@
   "pages.chat.turnBlock.earlier_step",
   "pages.chatPage.knowledge_item",
   "pages.chatPage.tabs_were_not_restored",
+  "pages.chatPage.comments_sent",
   "pages.chatSidebar.already_on_model",
   "pages.chatSidebar.archive_session",
   "pages.chatSidebar.archived_count",

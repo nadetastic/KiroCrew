@@ -12351,7 +12351,14 @@
       "dismiss_until_next_visit": "Nascondi fino alla prossima visita",
       "could_not_check_restored_tabs": "Non è stato possibile verificare se tutte le schede sono state ripristinate dopo l'ultimo riavvio.",
       "could_not_start_fresh_session": "Impossibile avviare una nuova sessione",
-      "delivery_unconfirmed_option": "Consegna non confermata: controlla la conversazione e, se manca, tocca di nuovo il suggerimento."
+      "delivery_unconfirmed_option": "Consegna non confermata: controlla la conversazione e, se manca, tocca di nuovo il suggerimento.",
+      "comments_pending_reconnect": "I tuoi commenti sono ancora in attesa. La chat si sta riconnettendo — premi di nuovo Invia tutto tra un momento.",
+      "delivery_unconfirmed_comments": "Consegna non confermata — se i tuoi commenti non sono nella conversazione qui sotto, premi di nuovo Invia tutto.",
+      "comments_sent_one": "{{count}} commento inviato",
+      "comments_refused": "{{name}} non ha ricevuto questi commenti — premi Invia tutto per inviarli di nuovo.",
+      "comments_sent_other": "{{count}} commenti inviati",
+      "comments_sent_many": "{{count}} commenti inviati",
+      "comments_unknown": "Commenti inviati — controlla la conversazione qui sotto per confermare che siano arrivati."
     },
     "chatSidebar": {
       "1_skipped_currently_selected": "(1 saltata — attualmente selezionata)",
