@@ -101,6 +101,11 @@ _ERROR_TEXT = "Something went wrong on my side. Please try again."
 
 def _strip_options(text: str) -> str:
     """Drop the dashboard-only [OPTIONS: ...] trailer (no buttons here)."""
+    from kiro_crew.options_list import split_bulleted_options_trailer
+
+    bulleted = split_bulleted_options_trailer(text)
+    if bulleted is not None:
+        return bulleted[0].strip()
     return OPTIONS_RE_TRAILER.sub("", relocate_glued_tail_marker(text)).strip()
 
 

@@ -126,6 +126,23 @@ export function filterCrewmateChat(messages: ChatMessage[]): ChatMessage[] {
   return kept.length === messages.length ? messages : kept
 }
 
+/** A crewmate's chat has no queue card: a message the gateway parked for the
+ *  next turn is still just the person's message, so it is drawn as their own
+ *  bubble at the end of the thread until the drain replaces it with the real
+ *  user row. Same array identity back when nothing is queued. A queued entry
+ *  whose send already has its row -- a steer the turn did not take, requeued
+ *  for the next one -- is that same message, so it draws no second bubble. */
+export function withQueuedAsBubbles(messages: ChatMessage[], queued: ChatMessage[]): ChatMessage[] {
+  if (queued.length === 0) return messages
+  const shown = new Set(messages.filter(m => m.role === 'user' && m.meta?.sendId).map(m => m.meta?.sendId))
+  const pending = queued.filter(q => !(q.meta?.sendId && shown.has(q.meta.sendId)))
+  if (pending.length === 0) return messages
+  return [
+    ...messages,
+    ...pending.map((q): ChatMessage => ({ ...q, role: 'user', cls: 'msg msg-u', meta: { ...q.meta, queuedBubble: true } })),
+  ]
+}
+
 /** Nearest row in `dir` that is not run-transparent, or undefined at an end. */
 function neighbour(messages: ChatMessage[], index: number, dir: -1 | 1): ChatMessage | undefined {
   for (let j = index + dir; j >= 0 && j < messages.length; j += dir) {

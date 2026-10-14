@@ -285,7 +285,9 @@ class CompactionCoordinator:
         self._deps = deps
         self.state = state
 
-    def check_context_usage(self, key: str, provider: LLMProvider) -> float:
+    def check_context_usage(
+        self, key: str, provider: LLMProvider, *, defer_compaction: bool = False
+    ) -> float:
         """Record usage and fire background compaction at the configured threshold."""
         owner = self._owner
         key = owner._fold_key(key)
@@ -296,6 +298,19 @@ class CompactionCoordinator:
         if session:
             session.prompt_count += 1
             self._record_floor(key, session, provider, pct)
+
+        # Only the proactive threshold may yield to an admitted human answer.
+        # Keep the critical ceiling, unknown readings, pending verdicts and
+        # existing compactions on their ordinary path; native limits stay native.
+        if (
+            defer_compaction
+            and 0 < pct < self._deps.post_compact_reset_pct
+            and self.compaction_due_after_turn(key, provider)
+        ):
+            self._deps.logger.info(
+                "Session %s context at %.0f%% -- deferring compaction for human reply", key, pct
+            )
+            return pct
 
         # Go through the owner so patches on SessionManager._trigger_compaction
         # keep intercepting the call after this extraction.

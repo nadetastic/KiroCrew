@@ -105,6 +105,13 @@ class PostureControl:
 # Where a sink runs only ONE of the two scanners, its detail text says so.
 _REDACTION_SINKS: tuple[tuple[str, str, str], ...] = (
     (
+        "Interrupted work in a crewmate reply",
+        "dashboard/responsive_chat.py",
+        "The bounded interrupted-turn reference passed to the next model prompt. "
+        "Structural markers are neutralized, then exfiltration URLs and "
+        "credentials are redacted before the reference enters model context.",
+    ),
+    (
         "The settings diagnosis",
         "dashboard/change_cards.py",
         "Current and default values of every setting `diagnose_settings` reports, "

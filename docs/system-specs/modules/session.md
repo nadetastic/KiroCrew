@@ -3239,7 +3239,8 @@ must agree, and an app-owned, linked, closing or replaced slot is ineligible.
 Other callers keep the ordinary send/steer/queue behavior; a body flag grants no
 cancellation authority. Ordinary Sessions defaults do not change.
 
-`dashboard/responsive_chat.py` accepts the message into the existing slot queue
+`dashboard/responsive_chat.py` first tries a steer into a running turn (below);
+otherwise it accepts the message into the existing slot queue
 before attempting cancellation. The entry keeps only normalized sendId, validated
 attachments and quote, and the server's admission snapshot; arbitrary caller
 metadata cannot mint queue plumbing or delivery stamps. Acceptance invokes the
@@ -3259,7 +3260,33 @@ entries without an ID keep their existing path; text never correlates an
 ID-bearing optimistic send.
 
 An idle parent drains the selected human entry despite attached background work.
-A running parent gets at most one bounded `cancel_owned_turn` attempt against the
+
+**Steer first.** When a running parent can take a steer -- a live turn owner,
+`supports_steer` on the published client, the captured session still routed, no
+Stop, pending approval/question/native permission, compaction, protected answer
+or claimed cancel -- the send goes through the existing `steer_into_running_turn`
+as the session's own human, with the reply-first guidance prefix, a minted
+`steer_delivery_id`, the containment snapshot and the sendId/attachments. The
+HTTP receipt returns at once: `{"ok": true, "steered": true, "responsive":
+"steered"}`, or the teardown's `queued` answer when the turn ended during the
+RPC. A steer the backend refuses falls through to the queue path below, unchanged.
+A steered send arms one background grace timer (`STEER_GRACE_SECONDS`, 3.0 s)
+for that turn; sends during it steer as well and join the same timer. The timer
+proves consumption from the existing signal only: the `steering_consumed` settle
+removes the raw text from `_pending_steers`. The other removers (teardown
+requeue, RPC unwind, hard stop) end or replace the owner, which the cancel
+rechecks. When the timer fires and any joined steer is still registered, it
+claims the turn's single cancel and runs the same exact-owner
+`cancel_owned_turn` below, with every recheck. A consumed steer, a changed owner,
+session or Stop generation, or a claimed cancel ends it with no cancel. The
+unconsumed steer stays registered, so the cancelled turn's teardown requeues it
+once through `_requeue_unconsumed_steers` as protected priority on its existing
+row; a turn that ends during the grace requeues it the same way. The turn-end
+tail, the next turn's start and `begin_close` drop a timer still waiting. A
+timer whose grace ended without a cancel lets a later send in the same turn arm
+a fresh one; once the cancel is claimed, later sends queue as today.
+
+Otherwise, a running parent gets at most one bounded `cancel_owned_turn` attempt against the
 exact Python turn owner and effective session captured by that turn. The
 coordinator rechecks slot incarnation, routing, Stop generation, native activity,
 pending interactions and compaction immediately before calling it. It never calls
@@ -3280,12 +3307,26 @@ queue under the slot lock and admission reservation, rechecking the slot, sessio
 stop generation and interaction fences. If settlement races the ending owner's
 final done-payload read, that owner performs the handoff before releasing the floor.
 
-Every responsive turn receives gateway-owned, prompt-only principles: answer the
-person first (a short acknowledgement when the answer needs work), delegate
+At an interrupted owner's end-of-turn usage check, a still-queued responsive
+human entry defers Crew's proactive compaction until the protected answering turn
+ends. Usage accounting still runs. The coordinator permits deferral only when its
+ordinary compaction-due predicate passes and confirmed usage is below the existing
+critical ceiling (`_POST_COMPACT_RESET_PCT`); critical or unknown readings, pending
+verdict settlement, recycling, and already-started compactions retain their ordinary
+paths. This is a turn-local request, not a changed threshold or a persistent flag.
+The answering turn performs the normal check even if more human entries are queued.
+Native harness compaction and hard context limits remain untouched: the previous
+usage reading does not prove that a new prompt or attachment fits, so a harness
+may still compact before answering. No tool-dispatch gate guarantees reply order.
+
+Every responsive turn receives gateway-owned, prompt-only principles: start with
+a brief text reply before any tool call (a short acknowledgement when the answer
+needs work), then delegate
 substantial remaining work within existing permissions, and inspect the existing
 operation before continuing anything with an unknown result. A bounded,
 redacted transcript reference restores the interrupted opener and observed
-output; output remains evidence, not a new instruction. The reference is held
+output; output remains evidence, not a new instruction. This model-context
+output is registered in the security-posture redaction sink inventory. The reference is held
 until a turn lands, never copied into persisted human text or replayed as a new
 user request. Delegation is agent guidance, not a guarantee that a model will
 delegate or that an orphaned tool's eventual output can be recovered.

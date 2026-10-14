@@ -147,6 +147,12 @@ describe('AssistantMessage', () => {
     expect(screen.queryByText(/Send/)).not.toBeInTheDocument()
   })
 
+  it('removes a final bulleted options block from the rendered answer', () => {
+    render(<AssistantMessage content={'Choose.\n[OPTIONS]\n- Alpha\n- Beta'} isStreaming={false} slotRunning={false} />)
+    expect(screen.getByTestId('md')).toHaveTextContent('Choose.')
+    expect(screen.getByTestId('md').textContent).not.toMatch(/OPTIONS|Alpha|Beta/)
+  })
+
   // Regression: OPTION_MARKER_RE anchors on a closing bracket that ends the line,
   // so a half-arrived marker can't match it and used to type itself out as prose
   // for the width of the marker line before flipping to pills at turn end.

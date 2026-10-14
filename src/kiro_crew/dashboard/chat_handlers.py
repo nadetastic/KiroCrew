@@ -1399,7 +1399,9 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
                 # was suspended — queueing again would deliver the same text twice.
                 return web.json_response({"ok": True, "queued": True})
             if _responsive_eligible:
-                return await responsive_chat.accept(request, slot, message, user_meta)
+                return await responsive_chat.accept(
+                    request, slot, message, user_meta, steer_first=False
+                )
             # steer requested but unavailable -> fall through to queue below.
         # Queue the message - return JSON immediately (no SSE needed).
         # The existing SSE reader will pick up queued messages as _run_chat

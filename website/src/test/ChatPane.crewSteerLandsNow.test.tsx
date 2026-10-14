@@ -198,16 +198,17 @@ describe('crewmate responsive Send', () => {
     expect(screen.getByText(/request refused/)).toBeInTheDocument()
   })
 
-  it('a real queued receipt replaces the provisional bubble without offering a client interrupt', async () => {
+  it('a real queued receipt stays a plain bubble with no queue card or interrupt', async () => {
     const { store } = renderCrewmate()
     await send('queued safely')
     act(() => {
       store.dispatch(appendSlotMessage({ slot: SLOT, message: { role: 'queued', content: 'queued safely', cls: '', meta: { queueId: 'queue-fixed' } } }))
     })
+    expect(screen.queryByTestId('queue-card')).toBeNull()
     await settle({ ok: true, queued: true, queue_id: 'queue-fixed' })
     expect(userRows(store)).toHaveLength(0)
     expect(screen.getAllByText('queued safely')).toHaveLength(1)
-    expect(screen.getByTestId('queue-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('queue-card')).toBeNull()
     expect(screen.queryByRole('button', { name: /interrupt/i })).toBeNull()
   })
 
@@ -348,6 +349,31 @@ describe('responsive question and queue repairs', () => {
     expect(screen.queryByText(/Delivery pending/)).toBeNull()
     expect(box).toHaveValue('')
     expect(screen.getAllByText('exact queue message')).toHaveLength(1)
-    expect(!!screen.queryByTestId('queue-card')).toBe(!drained)
+    expect(screen.queryByTestId('queue-card')).toBeNull()
+  })
+
+  it('a steered send keeps one bubble when its unconsumed steer is requeued for the next turn', async () => {
+    const { appendQueuedMessage, removeQueuedMessage } = await import('../store/chatSlice')
+    const { store } = renderCrewmate()
+    await send('answer me first')
+    const sendId = vi.mocked(api.sendChat).mock.calls[0][4]!.sendId as string
+    act(() => {
+      store.dispatch(appendSlotMessage({ slot: SLOT, message: { role: 'user', content: 'answer me first', cls: 'msg msg-u', ts: '2026-10-14T07:00:01Z', meta: { sendId, mid: 'mid-steer', steer: true, steerState: 'written', steer_delivery_id: 'd-1' } } }))
+    })
+    await settle({ ok: true, steered: true, responsive: 'steered' })
+    expect(userRows(store)).toHaveLength(1)
+    expect(userRows(store)[0].meta?.optimistic).toBeUndefined()
+    // The grace expired: the cancelled turn's teardown requeues the same send.
+    act(() => {
+      store.dispatch(appendQueuedMessage({ slot: SLOT, content: 'answer me first', ts: FIXED_TIME.toISOString(), queue_id: 'q-steer', meta: { sendId } }))
+    })
+    expect(screen.getAllByText('answer me first')).toHaveLength(1)
+    expect(screen.queryByTestId('queue-card')).toBeNull()
+    expect(screen.queryByText(/Steered|Steering|runs as its own/)).toBeNull()
+    act(() => {
+      store.dispatch(removeQueuedMessage({ slot: SLOT, content: 'answer me first', queue_id: 'q-steer', drain_writes_row: true, meta: { sendId } }))
+    })
+    expect(screen.getAllByText('answer me first')).toHaveLength(1)
+    expect(userRows(store)).toHaveLength(1)
   })
 })

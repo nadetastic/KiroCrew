@@ -2555,6 +2555,11 @@ def _redact(text: str) -> str:
 
 def _parse_options(text: str) -> list[str]:
     """Extract pipe-separated choices from the LAST [OPTIONS: A | B | C] in text."""
+    from kiro_crew.options_list import split_bulleted_options_trailer
+
+    bulleted = split_bulleted_options_trailer(text)
+    if bulleted is not None:
+        return bulleted[1]
     matches = list(_OPTIONS_RE.finditer(text))
     if not matches:
         return []
@@ -4494,6 +4499,9 @@ class _ChatSlot:
         if self._synthesis_recheck is not None:
             self._synthesis_recheck.cancel()
             self._synthesis_recheck = None
+        if self._responsive is not None:
+            # A responsive steer's grace timer may not outlive its slot.
+            self._responsive.cancel_grace()
 
     def cancel_close(self) -> None:
         """Release THIS holder's admission fence when teardown leaves the slot live.

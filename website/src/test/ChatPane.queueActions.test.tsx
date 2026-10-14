@@ -257,7 +257,25 @@ afterEach(() => vi.useRealTimers())
 describe('cold-mount queue from slot detail', () => {
   beforeEach(() => __resetPaneDraftsForTests())
 
-  it.each([false, true])('restores one cancellable card (crewmate=%s)', async (crewmate) => {
+  it('draws a crewmate queued entry as one plain bubble, never a queue card', async () => {
+    vi.setSystemTime(new Date(COLD_TS))
+    vi.mocked(api.chatSlotDetail).mockReset().mockResolvedValue(coldDetail as never)
+    const store = configureStore({
+      reducer: { chat: chatReducer, dashboard: dashboardReducer, notifications: notificationsReducer },
+      preloadedState: { dashboard: { ...dashboardReducer(undefined, { type: '@@INIT' }), connected: true } },
+    })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<Provider store={store}><QueryClientProvider client={qc}><ThemeProvider><MemoryRouter>
+      <ChatPane slotKey={COLD_SLOT} crewmate={{ name: 'Radar' }} />
+    </MemoryRouter></ThemeProvider></QueryClientProvider></Provider>)
+    expect(await screen.findByText(coldQueue.content)).toBeInTheDocument()
+    act(() => { store.dispatch(appendQueuedMessage(coldPush)) })
+    expect(screen.getAllByText(coldQueue.content)).toHaveLength(1)
+    expect(screen.queryByTestId('queue-card')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Cancel queued message' })).toBeNull()
+  })
+
+  it.each([false])('restores one cancellable card (crewmate=%s)', async (crewmate) => {
     vi.setSystemTime(new Date(COLD_TS))
     vi.mocked(api.chatSlotDetail).mockReset().mockResolvedValue(coldDetail as never)
     vi.mocked(api.cancelQueuedMessage).mockReset().mockResolvedValue({ ok: true } as never)

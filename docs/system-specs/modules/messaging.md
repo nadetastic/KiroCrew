@@ -4850,6 +4850,18 @@ stays local.
 
 ### One parse of the `[OPTIONS:]` marker
 
+The dashboard and channel readers also accept a final list-form block: a line
+containing exactly `[OPTIONS]` (case-insensitive, optionally followed by `:`),
+then one to six nonempty single-line items prefixed with `-`, `*`, or an ASCII
+number followed by `.` and whitespace. Trailing whitespace is ignored; intervening
+blank lines, continuation lines, indented code, and any subsequent prose reject
+the block without removing it. Ordinary lists remain prose. Each item stays one
+multi-select choice, including literal commas, pipes and brackets in its label.
+`options_list.split_bulleted_options_trailer` supplies the backend readers;
+the frontend `parseOptions` mirrors it, with shared cases in
+`test/fixtures/options_list.json`. The existing canonical marker grammar and
+channel-specific choice caps remain unchanged.
+
 `split_options_trailer(text, *, hide_partial=False) -> (body, choices)` is the
 single parse. `render_options_as_text` returns only the body, so every
 widget-capable renderer calls `split_options_trailer` rather than carrying a copy. A parse duplicated per channel

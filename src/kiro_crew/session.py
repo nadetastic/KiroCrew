@@ -2840,9 +2840,13 @@ class SessionManager:
         """
         return _resolve_compact_wait_secs(self._cfg.session.compact_wait_secs)
 
-    def check_context_usage(self, key: str, provider: LLMProvider) -> float:
-        """Delegate context accounting and compaction triggering."""
-        return self._compaction.check_context_usage(key, provider)
+    def check_context_usage(
+        self, key: str, provider: LLMProvider, *, defer_compaction: bool = False
+    ) -> float:
+        """Delegate accounting; a human handoff may defer non-critical compaction."""
+        return self._compaction.check_context_usage(
+            key, provider, defer_compaction=defer_compaction
+        )
 
     def effective_autocompact_pct(self, key: str) -> float:
         """Delegate *key*'s live compaction threshold.

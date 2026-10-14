@@ -14,7 +14,7 @@ import { createTranscriptRenderers } from '../pages/chat/transcriptRenderers'
 import ChatInput, { type ComposerBusyMode } from './ChatInput'
 import type { ChatInputProps } from './chat-input/props'
 import { busySteerFlag } from './chat-input/busySend'
-import { filterCrewmateChat } from './chat/crewmateBubbles'
+import { filterCrewmateChat, withQueuedAsBubbles } from './chat/crewmateBubbles'
 import CrewmateLiveActivity from './chat/CrewmateLiveActivity'
 import { useCrewmateGreetingShown } from './chat/useCrewmateGreetingShown'
 import type { CrewmateIdentity } from '../pages/chat/CrewmateMessage'
@@ -558,8 +558,8 @@ export default function ChatPane({
   // row, so the working indicator holds still while steps come and go.
   const crewmateLive = running || !!paneSlot?.running
   const messages = useMemo(
-    () => (crewmate ? filterCrewmateChat(paneMessages) : paneMessages),
-    [crewmate, paneMessages],
+    () => (crewmate ? filterCrewmateChat(withQueuedAsBubbles(paneMessages, queuedMessages)) : paneMessages),
+    [crewmate, paneMessages, queuedMessages],
   )
   // The host's greeting is drawn while it is still the newest word: a reply
   // landing after it (a patrol / wake turn keeps it up) takes it down.
@@ -2096,7 +2096,9 @@ export default function ChatPane({
             without a steer channel, a mid-plan send) must stay visible and
             cancellable — hiding real state is worse than showing a card the
             surface did not intend. */}
-        {queuedMessages.length > 0 && (
+        {/* A crewmate's chat draws a queued message as the person's own
+            bubble in the thread instead (`withQueuedAsBubbles`). */}
+        {!crewmate && queuedMessages.length > 0 && (
           <QueueStack messages={queuedMessages} onCancel={onCancelQueued} onInterrupt={crewmate ? undefined : onInterruptQueued} onEdit={onEditQueued} onReorder={onReorderQueued} pendingIds={queuePendingIds} />
         )}
 

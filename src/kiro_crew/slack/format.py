@@ -79,6 +79,11 @@ def extract_options(text: str) -> tuple[str, list[str]]:
     ``OPTIONS_RE_LINE``. Returns (cleaned_text, choices). If no OPTIONS is found,
     choices is empty.
     """
+    from kiro_crew.options_list import split_bulleted_options_trailer
+
+    bulleted = split_bulleted_options_trailer(text)
+    if bulleted is not None:
+        return bulleted
     text = relocate_glued_tail_marker(text)
     m = _OPTIONS_RE.search(text)
     if not m:

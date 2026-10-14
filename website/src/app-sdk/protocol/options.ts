@@ -15,7 +15,27 @@ export interface ParsedOptions {
   multi: boolean
 }
 
+/** A list-form marker is a trailer only: never consume prose after its items.
+ * Mirrors kiro_crew.options_list.split_bulleted_options_trailer. */
+function parseBulletedOptions(content: string): ParsedOptions | null {
+  const lines = content.trimEnd().split('\n')
+  const options: string[] = []
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 7); i--) {
+    const line = lines[i].trimEnd()
+    if (/^\[OPTIONS\]:?$/i.test(line)) {
+      if (!options.length) return null
+      return { text: stripOptionMarkers(lines.slice(0, i).join('\n')).trim(), options: options.reverse(), multi: true }
+    }
+    const item = /^(?:[-*]|[0-9]+\.)[ \t]+(\S.*)$/.exec(line)
+    if (!item) return null
+    options.push(item[1])
+  }
+  return null
+}
+
 export function parseOptions(content: string): ParsedOptions {
+  const bulleted = parseBulletedOptions(content)
+  if (bulleted) return bulleted
   // `findLastOptionMarker` applies BOTH halves of the grammar: the pattern that finds
   // candidates, and the check that a candidate's terminating closer is its own rather
   // than an unmatched opener's partner. The pattern is module-private precisely so

@@ -2312,8 +2312,9 @@ While work runs, the conversation keeps the typing bubble and its status line
 above, but draws no subagent progress bars or completion cards. Questions, errors, authentication requests and native/spawn approvals
 remain visible and actionable. The header and task detail surfaces keep their
 existing state sources; this is a conversation-only presentation rule, not a
-change to execution or history. A genuinely queued message stays visible and
-cancellable, with edit/reorder but no interrupt control on this surface.
+change to execution or history. A queued message is drawn as the person's own
+bubble at the end of the thread, with no queue card and no interrupt control;
+Sessions keeps the cancellable queue card.
 
 The crewmate `ChatPane` sends `responsive: true` on its normal Send request.
 Submitting a native question's answer while its turn runs additionally carries
@@ -2325,8 +2326,12 @@ not a decision model or a fork. Both that path and a validated explicit human
 steer receive reply-first/delegate-heavy-work principles as prompt context, not
 as displayed or persisted user text. Pending approvals/questions can defer the
 response rather than being silently rejected. An initial idle-admitted work turn
-remains interruptible; the priority answer admitted behind active work is protected
-so a burst queues rather than repeatedly cancelling that answer. Cancellation is
+remains interruptible; a send to a running turn is steered in first and cancels
+that turn only when the steer is still unconsumed after a 3-second grace, so a
+tool call that finishes in time is not thrown away. The priority answer admitted behind active work is protected
+so a burst queues rather than repeatedly cancelling that answer. A crewmate chat
+draws a requeued steer's queue entry as no second bubble: its send already has
+its row. Cancellation is
 not proof a tool or external side effect stopped. The full scheduling and recovery contract is in
 [session](session.md#responsive-human-sends-in-a-crewmate-dm). Ordinary Sessions
 and the reply-thread panel's separate reply endpoint retain their behavior.

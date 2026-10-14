@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,12 +32,19 @@ logger = logging.getLogger(__name__)
 # Failure leaves that task and the accepted queue entry in place.
 CANCEL_ACK_SECONDS = 1.0
 CANCEL_CALL_SECONDS = 1.5
+# A steer the running turn has not consumed by then earns the exact-owner cancel.
+# Most tool calls finish well inside it, so their result is not thrown away.
+STEER_GRACE_SECONDS = 3.0
+# The grace timer's clock; tests replace it with a gate they release.
+_grace_sleep = asyncio.sleep
 RECOVERY_CHARS = 16000
 RESPONSIVE_KEY = "_responsive_human"
 
 RESPONSE_GUIDANCE = (
     "For this turn, the person is waiting in your crewmate conversation. "
-    "Give the useful answer first, or a brief acknowledgement when more work is needed. "
+    "Start with a brief text reply to the person before calling tools: give the useful "
+    "answer when it is already known, or acknowledge their message when it needs work. "
+    "Tool checks and other substantial work follow that first reply. "
     "Keep this conversation available by delegating substantial remaining work through "
     "the existing background tools when available, within the current approvals and scope. "
     "Earlier work remains owed unless the person changes it. A cooperative model-turn "
@@ -60,6 +68,16 @@ class ResponsiveTurn:
     recovery: list[dict[str, str]] = field(default_factory=list)
     steers: dict[str, str] = field(default_factory=dict)
     steer_entries: dict[str, dict] = field(default_factory=dict)
+    # Raw steer texts awaiting consumption under the live grace timer.
+    grace_steers: set[str] = field(default_factory=set)
+    grace: asyncio.Task | None = None
+
+    def cancel_grace(self) -> None:
+        """Drop a timer still waiting; a claimed cancel finishes under its own bound."""
+        if self.grace is not None and not self.grace.done() and not self.attempted:
+            self.grace.cancel()
+        self.grace = None
+        self.grace_steers.clear()
 
 
 def turn_state(slot: Any) -> ResponsiveTurn:
@@ -78,6 +96,7 @@ def begin_turn(slot: Any, *, protected: bool) -> None:
     turn.steer_entries = {
         raw: entry for raw, entry in turn.steer_entries.items() if raw in turn.steers
     }
+    turn.cancel_grace()
     turn.owner = asyncio.current_task()
     turn.protected = protected
     turn.attempted = False
@@ -273,10 +292,25 @@ def observe_user_message(request: web.Request, message: str) -> None:
         logger.debug("on_user_message observer raised; ignoring", exc_info=True)
 
 
-async def accept(request: web.Request, slot: Any, message: str, meta: dict | None) -> web.Response:
-    """Retain one send before making a single, exact-owner cancel attempt."""
+async def accept(
+    request: web.Request,
+    slot: Any,
+    message: str,
+    meta: dict | None,
+    *,
+    steer_first: bool = True,
+) -> web.Response:
+    """Steer a live turn first; otherwise retain the send for one exact-owner cancel.
+
+    A steer receipt returns at once. Its grace timer runs in the background and
+    cancels only when the steer is still unconsumed and the owner is unchanged.
+    """
     state = request.app["state"]
     turn = turn_state(slot)
+    if steer_first and _steer_ready(state, slot, turn):
+        steered = await _steer_first(request, state, slot, turn, message, meta)
+        if steered is not None:
+            return web.json_response(steered)
     qid = queue_for_next_turn(
         state,
         slot,
@@ -321,57 +355,182 @@ async def accept(request: web.Request, slot: Any, message: str, meta: dict | Non
     elif turn.protected or turn.attempted or turn.owner is None:
         receipt["responsive"] = "queued"
     else:
-        owner = turn.owner
-        key = turn.session_key
-        stop_generation = slot._stop_generation
-
-        async def cancel_owned() -> str | None:
-            # The task wrapper can run later than admission. Recheck every fact
-            # immediately before entering the manager's exact-owner cancel.
-            if (
-                state._slots.get(slot.key) is not slot
-                or slot.is_closing
-                or turn.owner is not owner
-                or owner.done()
-                or effective_session_key(slot) != key
-                or slot._active_turn_session_key != key
-                or slot._stop_generation != stop_generation
-                or slot._stopping
-                or slot._stop_state != "idle"
-                or pending_interaction(slot)
-                or not native_turn_active(slot)
-                or compaction_in_flight(state.sessions, key)
-            ):
-                return None
-            cut = getattr(slot, "_steer_segment_cut", None)
-            if callable(cut):
-                cut()
-            prior_interrupted, prior_recovery = turn.interrupted, turn.recovery
-            turn.interrupted = True
-            recovery = turn.recovery = _recovery_rows(slot)
-            outcome = await state.sessions.cancel_owned_turn(
-                key,
-                owner,
-                wait_ack_timeout=CANCEL_ACK_SECONDS,
-            )
-            # Only None proves no cancel was sent. Uncertain outcomes retain
-            # recovery just as the session manager's replay contract requires.
-            if (
-                outcome is None
-                and turn.owner is owner
-                and turn.session_key == key
-                and turn.recovery is recovery
-            ):
-                turn.interrupted, turn.recovery = prior_interrupted, prior_recovery
-            return outcome
-
-        # Claim before yielding so a burst joins this attempt rather than
-        # opening concurrent cancels. It stays claimed until that turn ends.
-        turn.attempted = True
-        try:
-            outcome = await asyncio.wait_for(cancel_owned(), timeout=CANCEL_CALL_SECONDS)
-        except Exception:
-            logger.warning("Responsive cancel unavailable for slot %s; send retained", slot.key)
-            outcome = "error"
+        outcome = await _claim_cancel(
+            state, slot, turn, turn.owner, turn.session_key, slot._stop_generation
+        )
         receipt["responsive"] = "cancel_requested" if outcome == "acked" else "queued"
     return web.json_response(receipt)
+
+
+async def _cancel_owned(
+    state: Any, slot: Any, turn: ResponsiveTurn, owner: Any, key: str, stop_generation: int
+) -> str | None:
+    # The task wrapper can run later than admission. Recheck every fact
+    # immediately before entering the manager's exact-owner cancel.
+    if (
+        state._slots.get(slot.key) is not slot
+        or slot.is_closing
+        or turn.owner is not owner
+        or owner.done()
+        or effective_session_key(slot) != key
+        or slot._active_turn_session_key != key
+        or slot._stop_generation != stop_generation
+        or slot._stopping
+        or slot._stop_state != "idle"
+        or pending_interaction(slot)
+        or not native_turn_active(slot)
+        or compaction_in_flight(state.sessions, key)
+    ):
+        return None
+    cut = getattr(slot, "_steer_segment_cut", None)
+    if callable(cut):
+        cut()
+    prior_interrupted, prior_recovery = turn.interrupted, turn.recovery
+    turn.interrupted = True
+    recovery = turn.recovery = _recovery_rows(slot)
+    outcome: str | None = await state.sessions.cancel_owned_turn(
+        key,
+        owner,
+        wait_ack_timeout=CANCEL_ACK_SECONDS,
+    )
+    # Only None proves no cancel was sent. Uncertain outcomes retain
+    # recovery just as the session manager's replay contract requires.
+    if (
+        outcome is None
+        and turn.owner is owner
+        and turn.session_key == key
+        and turn.recovery is recovery
+    ):
+        turn.interrupted, turn.recovery = prior_interrupted, prior_recovery
+    return outcome
+
+
+async def _claim_cancel(
+    state: Any, slot: Any, turn: ResponsiveTurn, owner: Any, key: str, stop_generation: int
+) -> str | None:
+    # Claim before yielding so a burst joins this attempt rather than
+    # opening concurrent cancels. It stays claimed until that turn ends.
+    turn.attempted = True
+    try:
+        return await asyncio.wait_for(
+            _cancel_owned(state, slot, turn, owner, key, stop_generation),
+            timeout=CANCEL_CALL_SECONDS,
+        )
+    except Exception:
+        logger.warning("Responsive cancel unavailable for slot %s; send retained", slot.key)
+        return "error"
+
+
+def _steer_ready(state: Any, slot: Any, turn: ResponsiveTurn) -> bool:
+    """A live turn the cancel could target, whose backend accepts a steer now."""
+    key = turn.session_key
+    owner = turn.owner
+    return bool(
+        slot.turn_running
+        and getattr(slot._acp_client, "supports_steer", False) is True
+        and owner is not None
+        and not owner.done()
+        and not turn.protected
+        and not turn.attempted
+        and not slot.is_closing
+        and not slot._stopping
+        and slot._stop_state == "idle"
+        and effective_session_key(slot) == key
+        and slot._active_turn_session_key == key
+        and not pending_interaction(slot)
+        and native_turn_active(slot)
+        and not compaction_in_flight(state.sessions, key)
+    )
+
+
+def steer_unconsumed(slot: Any, message: str) -> bool:
+    """True while the steer is registered, so no ``steering_consumed`` echo settled it.
+
+    Only that settle, the teardown requeue, an RPC unwind and a hard stop remove a
+    pending steer. The timer starts after a delivered RPC, and the other two end
+    or replace the owner, which the cancel rechecks.
+    """
+    return message in slot._pending_steers
+
+
+async def _steer_first(
+    request: web.Request,
+    state: Any,
+    slot: Any,
+    turn: ResponsiveTurn,
+    message: str,
+    meta: dict | None,
+) -> dict[str, Any] | None:
+    from kiro_crew.dashboard.chat_delivery import (
+        STEER_REQUEUED,
+        STEER_STEERED,
+        _queued_entry_id,
+        steer_into_running_turn,
+    )
+    from kiro_crew.dashboard.session_control import containment_meta
+
+    owner, key, stop_generation = turn.owner, turn.session_key, slot._stop_generation
+    delivery_id = uuid.uuid4().hex
+    outcome = await steer_into_running_turn(
+        state,
+        slot,
+        message,
+        send_id=(meta or {}).get("sendId"),
+        user_origin=True,
+        admission=containment_meta(state, slot),
+        attachments=meta,
+        delivery_id=delivery_id,
+        responsive=True,
+    )
+    if outcome not in (STEER_STEERED, STEER_REQUEUED):
+        return None
+    notify_user_input(request, slot)
+    observe_user_message(request, message)
+    if outcome == STEER_REQUEUED:
+        # The turn's teardown already owns it as a priority queue entry.
+        receipt: dict[str, Any] = {"ok": True, "queued": True, "responsive": "queued"}
+        qid = _queued_entry_id(slot, delivery_id)
+        if qid:
+            receipt["queue_id"] = qid
+        return receipt
+    _arm_grace(state, slot, turn, owner, key, stop_generation, message)
+    return {"ok": True, "steered": True, "responsive": "steered"}
+
+
+_GRACE_TASKS: set[asyncio.Task] = set()
+
+
+def _arm_grace(
+    state: Any,
+    slot: Any,
+    turn: ResponsiveTurn,
+    owner: Any,
+    key: str,
+    stop_generation: int,
+    message: str,
+) -> None:
+    if turn.owner is not owner:
+        return  # The turn ended during the RPC; its teardown requeue owns the text.
+    turn.grace_steers.add(message)
+    if turn.grace is not None and not turn.grace.done():
+        return  # A burst joins the live timer.
+    task = asyncio.create_task(_grace(state, slot, turn, owner, key, stop_generation))
+    turn.grace = task
+    _GRACE_TASKS.add(task)
+    task.add_done_callback(_GRACE_TASKS.discard)
+
+
+async def _grace(
+    state: Any, slot: Any, turn: ResponsiveTurn, owner: Any, key: str, stop_generation: int
+) -> None:
+    await _grace_sleep(STEER_GRACE_SECONDS)
+    if turn.owner is not owner or turn.grace is not asyncio.current_task():
+        return
+    waiting = [m for m in turn.grace_steers if steer_unconsumed(slot, m)]
+    turn.grace = None
+    turn.grace_steers.clear()
+    if not waiting or turn.protected or turn.attempted:
+        return
+    # The unconsumed steer stays registered: the cancelled turn's teardown
+    # requeues it once, as protected priority, onto its existing row.
+    await _claim_cancel(state, slot, turn, owner, key, stop_generation)
