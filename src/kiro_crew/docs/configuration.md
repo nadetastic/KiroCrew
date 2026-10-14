@@ -126,8 +126,8 @@ provider.
 
 | Value | Harness | Notes |
 |-------|---------|-------|
-| `""` (default) | kiro-cli | The built-in default path. |
-| `kas` | Kiro Agent (KAS) | Served through kiro-cli's `acp --agent-engine v3` relay. |
+| `kas` | Kiro Agent (KAS) | Default when the config key is absent; served through kiro-cli's `acp --agent-engine v3` relay. |
+| `""` | kiro-cli | Stored only when the user chooses Kiro CLI. |
 | `claude` | Claude Code | Uses the public `claude-agent-acp` adapter. |
 | `codex` | Codex | Uses the Codex ACP adapter. |
 | `opencode` | OpenCode | Uses OpenCode's native ACP server. |
@@ -171,7 +171,6 @@ Set a registered value with, for example,
 {
   "agent": {
     "provider": "acp",
-    "acp_backend": "",
     "approval_mode": "auto",
     "model": "auto",
     "reasoning_effort": "",

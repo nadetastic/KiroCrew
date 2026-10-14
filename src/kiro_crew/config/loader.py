@@ -1652,13 +1652,30 @@ def unsandboxed_exec_declared() -> bool:
     An unreadable or non-object document contributes nothing: a corrupt config is
     not a declaration.
     """
+    return _agent_key_declared("sandbox_allow_unsandboxed_exec")
+
+
+def acp_backend_declared() -> bool:
+    """Whether either config document names ``agent.acp_backend``, in any value.
+
+    An absent key is "no harness choice" and resolves to the product default, so
+    :meth:`KiroCrewConfig.save` strips the field unless this is true. Read from
+    disk, like :func:`unsandboxed_exec_declared`, so the writer and every reader
+    answer the same question about one host instead of trusting an in-memory flag
+    that a snapshot loaded before a ``config set`` would contradict.
+    """
+    return _agent_key_declared("acp_backend")
+
+
+def _agent_key_declared(key: str) -> bool:
+    """Whether ``config.json`` or the ``config.local.json`` overlay names ``agent.<key>``."""
     for path in (config_path(), config_local_path()):
         try:
             doc = json.loads(read_config_text(path))
         except (OSError, ValueError):
             continue
         agent = doc.get("agent") if isinstance(doc, dict) else None
-        if isinstance(agent, dict) and "sandbox_allow_unsandboxed_exec" in agent:
+        if isinstance(agent, dict) and key in agent:
             return True
     return False
 
@@ -4607,6 +4624,17 @@ class KiroCrewConfig:
             agent_section = d.get("agent")
             if isinstance(agent_section, dict):
                 agent_section.pop("sandbox_allow_unsandboxed_exec", None)
+        # Same rule for ``agent.acp_backend``: absence is "no harness choice" and
+        # resolves to the product default, so a full-document snapshot must not
+        # freeze today's resolved harness in as a choice the user never made. Only
+        # this disk write strips it; ``to_dict()`` keeps the resolved value for
+        # every reader (``config get``, the dashboard response, the live watcher).
+        # An explicit pick reaches disk through the delta writers
+        # (``config set``, the dashboard PATCH), after which this reads declared.
+        if not acp_backend_declared():
+            agent_section = d.get("agent")
+            if isinstance(agent_section, dict):
+                agent_section.pop("acp_backend", None)
         # Strip overlay-owned values so they don't leak into config.json
         local_path = config_local_path()
         if local_path.is_file():

@@ -14,11 +14,11 @@ describe('isKiroBackend', () => {
     expect(isKiroBackend(undefined)).toBe(false)
   })
 
-  it('names kiro by its own id, which is also what an unset key means on the gateway', () => {
+  it('names kiro by its own id only: an unset key means KAS on the gateway', () => {
     expect(ACP_BACKEND_KIRO).toBe('')
     expect(isKiroBackend({ agent: { acp_backend: ACP_BACKEND_KIRO } })).toBe(true)
-    expect(isKiroBackend({ agent: {} })).toBe(true)
-    expect(isKiroBackend({})).toBe(true)
+    expect(isKiroBackend({ agent: {} })).toBe(false)
+    expect(isKiroBackend({})).toBe(false)
   })
 
   it('is false for every other harness, not just claude', () => {
@@ -33,7 +33,7 @@ describe('reportsCredits', () => {
     expect(reportsCredits(undefined)).toBe(false)
   })
 
-  it('is true for kiro-cli (also what an unset key means) and for its KAS relay', () => {
+  it('is true for kiro-cli and for its KAS relay (also what an unset key means)', () => {
     expect(reportsCredits({ agent: { acp_backend: ACP_BACKEND_KIRO } })).toBe(true)
     expect(reportsCredits({})).toBe(true)
     expect(reportsCredits({ agent: { acp_backend: ACP_BACKEND_KAS } })).toBe(true)

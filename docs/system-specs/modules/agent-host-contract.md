@@ -543,8 +543,9 @@ only the spellings it knows and an unknown one records no digest.
 
 ## The KAS backend, Crew side
 
-`agent.acp_backend = "kas"` selects the second, adapted ACP backend; the default
-and first-class path stays `kiro-cli`, and `agent.provider` remains `"acp"` —
+`agent.acp_backend = "kas"` selects the default adapted ACP backend. An
+absent key also selects KAS; a manual harness choice stores its id. Kiro CLI
+remains the first-class fallback floor, and `agent.provider` stays `"acp"` —
 the harness is never the provider selector (see
 [harness-parity.md](harness-parity.md)). Only the Kiro Crew-side integration is
 documented here: that backend is not open source, so its wire shapes, storage,

@@ -303,6 +303,11 @@ ACP_BACKEND_DEEPSEEK = "deepseek"
 # rather than leaving every call site to infer it from "not claude".
 ACP_BACKEND_KIRO = ""
 
+# An absent ``agent.acp_backend`` means the operator has never chosen a harness.
+# Keep that state distinct from an explicit Kiro CLI choice: new installs follow
+# KAS, while every manual choice is stored verbatim in config.json.
+DEFAULT_ACP_BACKEND = ACP_BACKEND_KAS
+
 # Membership gate for the ``acp_backend`` kwarg. An unrecognized value would
 # otherwise fall through every ``_is_<backend>`` check and silently spawn
 # kiro-cli, so provider construction rejects it instead.
@@ -786,30 +791,36 @@ def resolve_selected_backend(value: object) -> str:
     stack ends — and a broad ``except`` around it does not save you, it converts
     the crash into a silent wrong answer. Reading only the registry keeps it safe.
 
-    An unselectable or unrecognized value — a backend this build did not register, a
-    typo, or the non-string shapes a hand-edited ``config.json`` can hold — degrades
-    to the default with the reason in the log rather than propagating: ``AcpProvider``
-    rejects an unknown backend by raising, and startup refusing with a reason is the
-    contract (harness-parity H3).
+    Only an ABSENT value (``None``) selects :data:`DEFAULT_ACP_BACKEND`, and only
+    while it is selectable; otherwise the absent value takes the floor too. An
+    explicit value that is unselectable or unrecognized — a backend this build did
+    not register, one policy denied, one this host cannot serve, a typo, or the
+    non-string shapes a hand-edited ``config.json`` can hold — degrades to
+    :data:`GOVERNANCE_FLOOR_BACKEND` with the reason in the log rather than
+    propagating: ``AcpProvider`` rejects an unknown backend by raising, and startup
+    refusing with a reason is the contract (harness-parity H3).
 
     An edition that registers a backend must do so before the first config load; the
     registry is read here, not cached, so ordering is the edition's to get right.
     """
     selectable = selectable_backends()
+    if value is None:
+        return (
+            DEFAULT_ACP_BACKEND if DEFAULT_ACP_BACKEND in selectable else GOVERNANCE_FLOOR_BACKEND
+        )
     if isinstance(value, str) and value in selectable:
         return value
     # A host mark was announced once by whoever placed it; repeating it on every
     # config load would bury that notice under copies of a vaguer one.
     if isinstance(value, str) and value in _host_unservable:
-        return ACP_BACKEND_KIRO
-    if value not in (None, ACP_BACKEND_KIRO):
-        logger.warning(
-            "Ignoring agent.acp_backend %r (not selectable in this build); using "
-            "the default backend. Selectable values: %s",
-            value,
-            ", ".join(repr(b) for b in sorted(selectable)),
-        )
-    return ACP_BACKEND_KIRO
+        return GOVERNANCE_FLOOR_BACKEND
+    logger.warning(
+        "Ignoring agent.acp_backend %r (not selectable in this build); using "
+        "the Kiro CLI floor. Selectable values: %s",
+        value,
+        ", ".join(repr(b) for b in sorted(selectable)),
+    )
+    return GOVERNANCE_FLOOR_BACKEND
 
 
 # ── Capability membership (harness-parity H6, H7) ──

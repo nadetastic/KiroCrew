@@ -26,7 +26,7 @@
         "provider": "acp",
         "mcp_registry_mode": false,
         "mcp_quarantine_after_failures": 3,
-        "acp_backend": "",
+        "acp_backend": "kas",
         "member_acp_backend": "kas",
         "default_agent": "",
         "deepseek_env": {},
@@ -342,10 +342,10 @@
       "sensitive": false,
       "tags": [],
       "label": "ACP Backend",
-      "help": "Which ACP agent to drive: '' = kiro-cli (default), or any other registered selectable backend id (e.g. 'kas' = kiro-agent). The live list of values is served by GET /api/config/schema.",
+      "help": "Which ACP agent to drive. If omitted, KAS is the default. An explicit '' selects kiro-cli; any other value must be a registered selectable backend id. The live list is served by GET /api/config/schema.",
       "hasChildren": false,
       "enumValues": null,
-      "defaultValue": ""
+      "defaultValue": "kas"
     },
     {
       "path": "agent.member_acp_backend",

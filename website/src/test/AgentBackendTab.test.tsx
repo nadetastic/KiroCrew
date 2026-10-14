@@ -64,6 +64,7 @@ vi.mock('../pages/developer/KiroSignInCard', () => ({
 }))
 
 import { AgentBackendTab } from '../pages/developer/AgentBackendTab'
+import { DEFAULT_ACP_BACKEND } from '../api/acpBackend'
 
 /** A schema map advertising exactly `values` for the backend field. */
 function schemaWith(values: string[] | undefined) {
@@ -250,18 +251,14 @@ describe('AgentBackendTab list', () => {
     expect(row('KAS (kiro-agent)')).toBeInTheDocument()
   })
 
-  it('puts the two kiro-family harnesses first and sorts the adapters after', async () => {
-    // KAS is not an adapter: it is kiro-cli's own relay, sharing kiro's install
-    // verdict, so the two harnesses that are really one install stay adjacent at the
-    // head. Under `policy_id` alone KAS sorts on 'k' and lands behind 'claude', which
-    // reads as a rank rather than an alphabet.
+  it('puts KAS first, Kiro CLI second, and sorts adapters after', async () => {
     acpBackendsMock.mockResolvedValue({
       backends: [probeRow(''), probeRow('claude'), probeRow('kas'), probeRow('zephyr')],
     })
     schemaMock.mockReturnValue(schemaWith(['', 'claude', 'kas', 'zephyr']))
     wrap()
     await waitFor(() => expect(screen.getAllByRole('radio')).toHaveLength(4))
-    expect(rows()).toEqual(['Kiro CLI', 'KAS (kiro-agent)', 'Claude Code', 'zephyr'])
+    expect(rows()).toEqual(['KAS (kiro-agent)', 'Kiro CLI', 'Claude Code', 'zephyr'])
   })
 
   it('marks the configured backend as the current one', async () => {
@@ -271,10 +268,10 @@ describe('AgentBackendTab list', () => {
     expect(row('Kiro CLI')).not.toHaveAttribute('aria-current')
   })
 
-  it('treats a missing acp_backend as kiro-cli rather than as unset', async () => {
+  it('treats a missing acp_backend as the KAS default', async () => {
     kirocrewConfigMock.mockResolvedValue({})
     wrap()
-    await waitFor(() => expect(row('Kiro CLI')).toHaveAttribute('aria-current', 'true'))
+    await waitFor(() => expect(row('KAS (kiro-agent)')).toHaveAttribute('aria-current', 'true'))
   })
 
   it('opens on the current backend detail', async () => {
@@ -711,6 +708,15 @@ describe('AgentBackendTab switching', () => {
     await waitFor(() => expect(patchConfigMock).toHaveBeenCalledWith('agent.acp_backend', 'claude'))
   })
 
+  it('stores an explicit Kiro CLI choice even though KAS is the default', async () => {
+    kirocrewConfigMock.mockResolvedValue({})
+    wrap()
+    await waitFor(() => expect(row('KAS (kiro-agent)')).toHaveAttribute('aria-current', 'true'))
+    highlight('Kiro CLI')
+    fireEvent.click(useButton('Kiro CLI'))
+    await waitFor(() => expect(patchConfigMock).toHaveBeenCalledWith('agent.acp_backend', ''))
+  })
+
   it('saves the Claude Code selection the shipped build offers', async () => {
     // Claude is in the public baseline; the only thing that used to be missing was
     // the switch.
@@ -880,10 +886,52 @@ describe('AgentBackendTab status strip', () => {
     // supported. Those claims were not measured anywhere and were wrong.
     wrap()
     await waitFor(() => expect(row('Kiro CLI')).toBeInTheDocument())
-    expect(detail().textContent).toContain('Default.')
     highlight('KAS (kiro-agent)')
+    expect(detail().textContent).toContain('Default.')
+    highlight('Claude Code')
     expect(detail().textContent).toContain('Experimental')
     expect(screen.queryByText(/OS sandbox|Anthropic|steered mid-turn/)).toBeNull()
+  })
+
+  it('puts the default line on DEFAULT_ACP_BACKEND, not on Kiro CLI', async () => {
+    // New installs run KAS. A page that called Kiro CLI the default and tagged KAS
+    // Experimental would tell a new user the harness they are on is the risky one.
+    acpBackendsMock.mockResolvedValue({
+      backends: [probeRow('', card()), probeRow('kas', card()), probeRow('claude', card())],
+    })
+    wrap()
+    await waitFor(() => expect(row('KAS (kiro-agent)')).toBeInTheDocument())
+    expect(DEFAULT_ACP_BACKEND).toBe('kas')
+
+    highlight('KAS (kiro-agent)')
+    await waitFor(() => expect(detail().textContent).toContain('Default.'))
+    expect(panel().queryByText('Experimental')).toBeNull()
+    expect(document.getElementById('agent-backend-row-status-kas')?.textContent).toBe('Default.')
+
+    // Kiro CLI is the stable floor: neither the default nor Experimental.
+    highlight('Kiro CLI')
+    await waitFor(() =>
+      expect(detail().textContent).toContain('Kiro CLI is installed and ready to use.'),
+    )
+    expect(detail().textContent).not.toContain('Default.')
+    expect(panel().queryByText('Experimental')).toBeNull()
+    const kiroStatus = document.getElementById('agent-backend-row-status-kiro')?.textContent ?? ''
+    expect(kiroStatus).not.toMatch(/Default|Experimental/)
+
+    // Any other harness is still Experimental.
+    highlight('Claude Code')
+    await waitFor(() => expect(panel().getByText('Experimental')).toBeInTheDocument())
+    expect(detail().textContent).not.toContain('Default.')
+    expect(document.getElementById('agent-backend-row-status-claude')?.textContent).toBe(
+      'Experimental',
+    )
+  })
+
+  it('says neither Default nor Experimental for Kiro CLI with no probe answer', async () => {
+    wrap()
+    await waitFor(() => expect(row('Kiro CLI')).toBeInTheDocument())
+    highlight('Kiro CLI')
+    expect(detail().textContent).not.toMatch(/Default\.|Experimental/)
   })
 
   it('says what to install and offers the install command to copy', async () => {
@@ -1152,7 +1200,7 @@ describe('AgentBackendTab check again', () => {
     expect(acpBackendsMock.mock.calls.length).toBe(listCalls)
     // The untouched row kept its own answer.
     highlight('Kiro CLI')
-    expect(detail().textContent).toContain('Default.')
+    expect(detail().textContent).toContain('Kiro CLI is installed and ready to use.')
   })
 
   it('cancels the in-flight poll so it cannot land on top of the fresh row', async () => {
@@ -1349,7 +1397,7 @@ describe('AgentBackendTab check again', () => {
     wrap()
     await waitFor(() => expect(row('Kiro CLI')).toBeInTheDocument())
     await waitFor(() =>
-      expect(detail().textContent).toContain('Default.'),
+      expect(detail().textContent).toContain('Kiro CLI is installed and ready to use.'),
     )
     expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
   })
@@ -1710,7 +1758,7 @@ describe('AgentBackendTab detail card', () => {
     schemaMock.mockReturnValue(schemaWith(['']))
     wrap()
     await waitFor(() =>
-      expect(detail().textContent).toContain('Default.'),
+      expect(detail().textContent).toContain('Kiro CLI is installed and ready to use.'),
     )
     expect(screen.queryByText(/supports \d+ of/)).toBeNull()
     expect(screen.queryByText('Good to know')).toBeNull()
@@ -2019,7 +2067,7 @@ describe('AgentBackendTab standing caveats', () => {
     wrap()
     await waitFor(() => expect(row('KAS (kiro-agent)')).toBeInTheDocument())
     highlight('KAS (kiro-agent)')
-    await waitFor(() => expect(panel().getByText('Experimental')).toBeInTheDocument())
+    await waitFor(() => expect(detail().textContent).toContain('Default.'))
     expect(screen.queryByText('Run: kiro login')).toBeNull()
   })
 

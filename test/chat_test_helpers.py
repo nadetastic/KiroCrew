@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import os
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,6 +22,25 @@ from kiro_crew.messaging.link import ChannelLink, binding_token
 #: forever fails the test instead of hanging until the 120s pytest timeout, whose
 #: report names the timeout and not the task.
 _DRAIN_ROUNDS = 20
+
+
+def pin_kiro_cli_harness() -> None:
+    """Record kiro-cli as the chosen harness in this test's data home.
+
+    A config with no ``agent.acp_backend`` resolves to KAS, which answers native
+    slash commands (``/tools``, ``/clear``, an in-turn agent switch) locally. A
+    test of the kiro-cli path through those commands states the choice the way a
+    user does, in ``config.json``, so every reader in the turn agrees on it.
+    """
+    from kiro_crew.agent_sdk.backends import ACP_BACKEND_KIRO
+    from kiro_crew.config.loader import _invalidate_config_cache, config_path
+
+    path = config_path()
+    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data.setdefault("agent", {})["acp_backend"] = ACP_BACKEND_KIRO
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    _invalidate_config_cache()
 
 
 def move_transcript_past(log: ConversationLog, key: str, sig: float) -> None:

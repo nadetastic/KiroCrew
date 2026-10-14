@@ -9659,6 +9659,9 @@ class TestRuntimeWiring:
         and a cancelled terminal re-arms it because the provider discards that
         turn. The next accepted ordinary prompt finally clears the lease.
         """
+        from chat_test_helpers import pin_kiro_cli_harness
+
+        pin_kiro_cli_harness()
         monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
 
         build_message_calls: list[dict] = []
@@ -20924,6 +20927,9 @@ class TestEmptyResponseRetry:
     @pytest.mark.asyncio
     async def test_clear_turn_no_empty_response_error(self, tmp_path: Path) -> None:
         """Clear turns set assistant_text='' but should NOT trigger the empty-response notice."""
+        from chat_test_helpers import pin_kiro_cli_harness
+
+        pin_kiro_cli_harness()
         from kiro_crew.providers.base import EVENT_CLEAR_STATUS, EVENT_COMPLETE, LLMEvent
 
         state, slot, client, _run_chat = self._make_state_and_slot(tmp_path)

@@ -599,6 +599,20 @@ def validate_config_data(data: dict) -> dict:
                 custom_sha256=stt.get("custom_model_sha256", ""),
             )
 
+    # 3d. ``agent.acp_backend`` has a product default distinct from its safety
+    # floor. An absent key selects KAS, but a PRESENT malformed value must not be
+    # deleted into that same absence by jsonschema: it is an unusable explicit
+    # choice and resolves to the Kiro floor. Normalize it before type validation
+    # so jsonschema-backed loads keep that distinction. jsonschema is a pinned
+    # runtime dependency; the early no-jsonschema return is an import-failure
+    # survival path and keeps its historical field-default fallback.
+    if isinstance(agent, dict) and "acp_backend" in agent and not isinstance(
+        agent["acp_backend"], str
+    ):
+        from kiro_crew.acp_backends import GOVERNANCE_FLOOR_BACKEND
+
+        agent["acp_backend"] = GOVERNANCE_FLOOR_BACKEND
+
     # 4. Preserve numeric values written by older config writers.
     _coerce_legacy_numeric_values(data, JSON_SCHEMA)
 

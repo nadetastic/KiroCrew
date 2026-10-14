@@ -11,14 +11,15 @@ import type { AcpBackendProbe } from './client/config'
  * that would silently hand Kiro-only behaviour to every harness added later.
  */
 
-/** The kiro-cli backend's id (`ACP_BACKEND_KIRO` on the gateway). It is the
- *  empty string, which is also what an UNSET key means: the gateway itself falls
- *  back to kiro-cli when the key is absent, so an absent key names kiro too. */
+/** The kiro-cli backend's id (`ACP_BACKEND_KIRO` on the gateway). */
 export const ACP_BACKEND_KIRO = ''
 
 /** The KAS backend's id (`ACP_BACKEND_KAS` on the gateway): kiro-cli's relay,
  *  which completes first-run setup on kiro-cli ACP support, not a kiro-cli login. */
 export const ACP_BACKEND_KAS = 'kas'
+
+/** An absent config key means no manual choice, so new installs use KAS. */
+export const DEFAULT_ACP_BACKEND = ACP_BACKEND_KAS
 
 /** The slice of the config body this check reads. */
 export interface AcpBackendConfig {
@@ -32,7 +33,7 @@ export interface AcpBackendConfig {
  */
 export function isKiroBackend(cfg: AcpBackendConfig | undefined): boolean {
   if (cfg === undefined) return false
-  return (cfg.agent?.acp_backend ?? ACP_BACKEND_KIRO) === ACP_BACKEND_KIRO
+  return (cfg.agent?.acp_backend ?? DEFAULT_ACP_BACKEND) === ACP_BACKEND_KIRO
 }
 
 /**
@@ -46,7 +47,7 @@ export function isKiroBackend(cfg: AcpBackendConfig | undefined): boolean {
  */
 export function reportsCredits(cfg: AcpBackendConfig | undefined): boolean {
   if (cfg === undefined) return false
-  const backend = cfg.agent?.acp_backend ?? ACP_BACKEND_KIRO
+  const backend = cfg.agent?.acp_backend ?? DEFAULT_ACP_BACKEND
   return backend === ACP_BACKEND_KIRO || backend === ACP_BACKEND_KAS
 }
 

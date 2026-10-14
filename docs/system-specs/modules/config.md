@@ -16,7 +16,7 @@ the loader: `config_path`, `config_dir`, `config_local_path`, `env_path`,
 `_config_fingerprint`, `_validate_config_data`, `_persist_config_migration`,
 `_apply_document_migrations`, `_log_config_clamp_event`,
 `_DEFAULT_CHAT_TURN_TIMEOUT_SECS`, `DEFAULT_POOL_SIZE`, `unsandboxed_exec_declared`,
-`publish_config_timezone`, `record_adoptions` (the loader passes it to the
+`acp_backend_declared`, `publish_config_timezone`, `record_adoptions` (the loader passes it to the
 migration transform at call time), each `_build_*` name as `build_config`
 calls it, and the published-snapshot globals. A helper or constant read INSIDE a
 relocated builder or migration rule is patched on the module that reads it:
@@ -73,6 +73,7 @@ because its readers look up a name the loader's callers and tests patch there:
 | Credential keys, the `.env` reader, the dashboard port | [code-style](../common/code-style.md) names `config/loader.py` for `CRED_*` and `_DEFAULT_PORT`. |
 | Data-home and workspace path helpers | Tests and callers patch `config_path`, `config_dir`, `env_path`, `workspace_root` and `_default_workspace_base` on this module. The instance-pairing and redactor-registry scans key `read_local_secret` and `credential_redaction_path` to this file. |
 | The unsandboxed-exec platform policy | [security](security.md) places that resolution in the loader, where the raw document is read. `unsandboxed_exec_declared` reads the patched `config_path`/`config_local_path` and is itself patched on this module. |
+| The harness-choice record | An absent `agent.acp_backend` means no harness choice and resolves to the default ([harness-parity](harness-parity.md) H1). `to_dict()` carries the resolved value for every reader; `save()` strips the key unless `acp_backend_declared()` finds it in `config.json` or the `config.local.json` overlay, read from disk like `unsandboxed_exec_declared`. |
 | Document I/O: `_raw_config`, `read_config_for_update`, `write_config_atomically`, `update_config_locked`, the meta stamp | The config-writer scans in `test_config_rmw_preserves_settings.py` exempt only `loader.py`, and the writers read this module's patched path and `atomic_write` names. |
 | Write-back persistence (`_persist_config_migration`, the backup) and the `_apply_document_migrations` seam | It rewrites `config.json` under the same writer exemption, and passes this module's `record_adoptions` to the transform as the adoption-ledger writer. |
 | The validated-document cache fingerprint, its overlay sidecar and invalidation | `_config_fingerprint` reads the patched `config_path`/`config_local_path` and is itself patched on this module; `save()` and the write-back call `_invalidate_config_cache` beside it. |

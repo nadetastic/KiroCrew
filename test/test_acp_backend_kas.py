@@ -1,9 +1,8 @@
 """ACP backend selection: the ``kas`` (kiro-agent) backend identifier.
 
-KAS is a third ACP backend alongside kiro-cli and claude-agent-acp. It is
-selected by ``agent.acp_backend`` and is inert until explicitly configured, so
-these tests pin two things: that the selector reaches the client, and that the
-DEFAULT configuration still resolves to kiro-cli.
+KAS is an ACP backend alongside kiro-cli and claude-agent-acp. An absent
+``agent.acp_backend`` selects KAS, while every explicit choice remains stored.
+These tests pin both the default and the selector reaching the client.
 
 The validation test matters because an unrecognized backend string would pass
 every ``_is_<backend>`` check and spawn kiro-cli — a typo'd config would drive
@@ -239,12 +238,12 @@ class TestConfigThreading:
     future refactor from dropping the kwarg silently.
     """
 
-    def test_default_config_is_kiro(self):
+    def test_default_config_is_kas(self):
         cfg = KiroCrewConfig()
-        assert cfg.agent.acp_backend == ACP_BACKEND_KIRO
+        assert cfg.agent.acp_backend == ACP_BACKEND_KAS
         provider = cfg.create_provider_factory()(session_key="test:default", agent="")
-        assert provider.is_kiro_backend is True
-        assert provider.is_kas_backend is False
+        assert provider.is_kas_backend is True
+        assert provider.is_kiro_backend is False
 
     def test_configured_kas_reaches_the_provider(self):
         cfg = KiroCrewConfig()
@@ -286,8 +285,15 @@ class TestConfigRoundTrip:
         assert cfg.agent.acp_backend == ACP_BACKEND_KIRO
         assert cfg.agent.streaming is False
 
-    def test_absent_key_loads_as_the_default(self, tmp_path):
-        assert _load_agent_config({}, tmp_path).agent.acp_backend == ACP_BACKEND_KIRO
+    def test_absent_key_loads_as_kas_and_every_reader_sees_it(self, tmp_path):
+        """``to_dict()`` serves every reader, so it carries the RESOLVED harness.
+
+        Only ``save()``'s disk write keeps an absent choice absent (see
+        ``TestSaveKeepsAnAbsentChoiceAbsent``).
+        """
+        cfg = _load_agent_config({}, tmp_path)
+        assert cfg.agent.acp_backend == ACP_BACKEND_KAS
+        assert cfg.to_dict()["agent"]["acp_backend"] == ACP_BACKEND_KAS
 
     def test_kas_survives_a_load_from_disk(self, tmp_path):
         """The selectable value must reach the provider, not degrade.
@@ -302,15 +308,126 @@ class TestConfigRoundTrip:
         provider = cfg.create_provider_factory()(session_key="test:rt", agent="")
         assert provider.is_kas_backend is True
 
-    @pytest.mark.parametrize("bad", ["kiro-cli", "KAS", "claude_code", 7, None, []])
-    def test_unselectable_values_degrade_to_the_default(self, bad, tmp_path):
-        """A typo must not take the gateway down.
+    def test_explicit_kiro_choice_survives_a_load_from_disk(self, tmp_path):
+        cfg = _load_agent_config({"acp_backend": ACP_BACKEND_KIRO}, tmp_path)
+        assert cfg.agent.acp_backend == ACP_BACKEND_KIRO
+        assert cfg.to_dict()["agent"]["acp_backend"] == ACP_BACKEND_KIRO
 
-        ``AcpProvider`` raises on an unknown backend, so an unnormalized value
-        would turn a config typo into a startup crash.
+    @pytest.mark.parametrize("bad", [7, [], None])
+    def test_wrong_typed_explicit_values_take_the_kiro_floor(self, bad, tmp_path):
+        """A malformed explicit value differs from an absent key.
+
+        Validation keeps that distinction before its type pass, so a bad stored
+        choice cannot silently become the KAS product default.
         """
         cfg = _load_agent_config({"acp_backend": bad}, tmp_path)
         assert cfg.agent.acp_backend == ACP_BACKEND_KIRO
+
+    @pytest.mark.parametrize("bad", ["kiro-cli", "KAS", "claude_code", "byo-harness"])
+    def test_unselectable_explicit_values_degrade_to_the_kiro_floor(self, bad, tmp_path):
+        """A typo must not take the gateway down, and must not pick KAS.
+
+        ``AcpProvider`` raises on an unknown backend, so an unnormalized value
+        would turn a config typo into a startup crash. Only an ABSENT key earns
+        the KAS default; a bad explicit value takes the Kiro CLI floor
+        (harness-parity H3).
+        """
+        cfg = _load_agent_config({"acp_backend": bad}, tmp_path)
+        assert cfg.agent.acp_backend == ACP_BACKEND_KIRO
+
+    def test_masked_config_response_reports_the_resolved_default(self, tmp_path):
+        """GET /api/config/kirocrew must name the harness actually in use.
+
+        The dashboard reads ``agent.acp_backend`` from the masked response, which
+        is built from ``to_dict()``.
+        """
+        from kiro_crew.dashboard.handlers.core import _masked_config_dict
+
+        cfg = _load_agent_config({}, tmp_path)
+        assert _masked_config_dict(cfg)["agent"]["acp_backend"] == ACP_BACKEND_KAS
+
+
+class TestSaveKeepsAnAbsentChoiceAbsent:
+    """An absent ``agent.acp_backend`` is "no choice", and only disk keeps it so.
+
+    ``save()`` decides from the file on disk, not from an in-memory flag, so the
+    resolved default never lands as a fake stored choice while every reader of
+    ``to_dict()`` (``config get``, the dashboard) still sees the resolved value.
+    """
+
+    @pytest.fixture
+    def home(self, tmp_path: Path):
+        d = tmp_path / "crew"
+        d.mkdir()
+        with (
+            patch("kiro_crew.config.loader.config_path", return_value=d / "config.json"),
+            patch(
+                "kiro_crew.config.loader.config_local_path",
+                return_value=d / "config.local.json",
+            ),
+            patch("kiro_crew.config.loader.config_dir", return_value=d),
+            patch("kiro_crew.cli_config.config_path", return_value=d / "config.json"),
+            patch(
+                "kiro_crew.cli_config.config_local_path",
+                return_value=d / "config.local.json",
+            ),
+            patch("kiro_crew.cli_config.sel"),
+        ):
+            yield d
+
+    @staticmethod
+    def _agent_on_disk(home: Path) -> dict:
+        return json.loads((home / "config.json").read_text(encoding="utf-8")).get("agent", {})
+
+    def test_config_get_reports_the_default_on_a_new_install(self, home, capsys):
+        import argparse
+
+        from kiro_crew.cli_config import _run_config_cmd
+
+        (home / "config.json").write_text(json.dumps({"agent": {}}), encoding="utf-8")
+        _run_config_cmd(argparse.Namespace(config_action="get", key="agent.acp_backend"))
+        assert capsys.readouterr().out.strip() == ACP_BACKEND_KAS
+
+    def test_the_boot_default_write_stores_no_choice(self, home):
+        # No file yet: the boot path's ``KiroCrewConfig().save()``.
+        KiroCrewConfig().save()
+        assert "acp_backend" not in self._agent_on_disk(home)
+        assert KiroCrewConfig.load().agent.acp_backend == ACP_BACKEND_KAS
+
+    def test_a_full_save_of_an_absent_choice_keeps_it_absent(self, home):
+        (home / "config.json").write_text(
+            json.dumps({"agent": {"streaming": False}}), encoding="utf-8"
+        )
+        cfg = KiroCrewConfig.load()
+        assert cfg.to_dict()["agent"]["acp_backend"] == ACP_BACKEND_KAS
+        cfg.save()
+        agent = self._agent_on_disk(home)
+        assert "acp_backend" not in agent
+        assert agent["streaming"] is False
+
+    def test_an_explicit_kiro_choice_survives_load_and_save(self, home):
+        (home / "config.json").write_text(
+            json.dumps({"agent": {"acp_backend": ACP_BACKEND_KIRO}}), encoding="utf-8"
+        )
+        KiroCrewConfig.load().save()
+        assert self._agent_on_disk(home)["acp_backend"] == ACP_BACKEND_KIRO
+        assert KiroCrewConfig.load().agent.acp_backend == ACP_BACKEND_KIRO
+
+    def test_an_overlay_only_choice_counts_as_declared(self, home):
+        """A pick in ``config.local.json`` is a choice; save() must not strip it.
+
+        The overlay subtraction then keeps the overlay-owned value out of the
+        base file, so the base stays free of a choice it never held.
+        """
+        (home / "config.json").write_text(json.dumps({"agent": {}}), encoding="utf-8")
+        (home / "config.local.json").write_text(
+            json.dumps({"agent": {"acp_backend": ACP_BACKEND_KIRO}}), encoding="utf-8"
+        )
+        cfg = KiroCrewConfig.load()
+        assert cfg.to_dict()["agent"]["acp_backend"] == ACP_BACKEND_KIRO
+        cfg.save()
+        assert "acp_backend" not in self._agent_on_disk(home)
+        assert KiroCrewConfig.load().agent.acp_backend == ACP_BACKEND_KIRO
 
 
 class TestBackendThreading:
