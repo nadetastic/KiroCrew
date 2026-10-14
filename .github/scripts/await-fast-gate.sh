@@ -5,9 +5,11 @@
 # .github/workflows/ci.yml with the identity of the commit under test in the
 # environment:
 #
-#   GH_TOKEN REPO SHA EVENT BRANCH HEAD_REPO
+#   GH_TOKEN REPO SHA EVENT BRANCH HEAD_REPO RUN_ID
 #
-# and nothing else. The job's step is one line -- `bash
+# and nothing else. RUN_ID is this CI run's own id: on a push whose Fast Gate
+# run was superseded, the barrier cancels this run rather than failing it (see
+# cancel_if_superseded below). The job's step is one line -- `bash
 # .github/scripts/await-fast-gate.sh` -- so this file IS the barrier's logic.
 #
 # ## Why a script and not an inline `run:` body
@@ -58,6 +60,108 @@ TOTAL_BUDGET="${TOTAL_BUDGET:-720}"
 # an override it is `date +%s`, unchanged.
 now() { ${AWAIT_FG_NOW:-date +%s}; }
 nap() { ${AWAIT_FG_SLEEP:-sleep} "$1"; }
+
+# How long a self-cancel may take to land before the barrier fails closed, and
+# how far past a gate run's cancellation the run that evicted it may report its
+# start. The job's timeout-minutes covers TOTAL_BUDGET plus CANCEL_BUDGET.
+CANCEL_BUDGET=90
+SUPERSEDE_SLACK=60
+
+# A cancelled gate on a push to main that was SUPERSEDED, not judged.
+#
+# On a push, fast-gate.yml and ci.yml each keep one running and one pending run
+# per ref, and a run entering the group evicts the pending one as `cancelled`
+# before any of its jobs start. The two groups drain independently, so this CI
+# run can be running while its Fast Gate run still waits; the next push to main,
+# or a re-run of an older Fast Gate run, then evicts it. Nothing judged this
+# commit, so the outcome that fits is the one a CI run evicted from its own
+# group gets: `cancelled`. This run reaches it by cancelling itself. The heavy
+# matrix is never released on this path.
+#
+# Supersession is proven from two reads, never assumed:
+#   1. the cancelled gate run's attempt has no jobs, so it never started; and
+#   2. another Fast Gate push run on this branch started between the gate run's
+#      creation and its cancellation (plus SUPERSEDE_SLACK seconds); the one
+#      that started closest to the cancellation is named as the run whose entry
+#      into the group evicted it.
+# A read that fails, or a proof that does not hold, returns to the caller, which
+# fails closed as for any other cancelled gate. Only a push reaches this: a pull
+# request's CI run is cancelled together with its gate run, and a merge group's
+# ref is unique to the group.
+cancel_if_superseded() {
+  local gate="$1" gid gurl attempt created cancelled_at jobs njobs others evictor err asked
+  gid="$(printf '%s' "$gate" | jq -r '.id')"
+  gurl="$(printf '%s' "$gate" | jq -r '.html_url')"
+  attempt="$(printf '%s' "$gate" | jq -r '.run_attempt // 1')"
+  created="$(printf '%s' "$gate" | jq -r '.created_at // ""')"
+  cancelled_at="$(printf '%s' "$gate" | jq -r '.updated_at // ""')"
+  if [ -z "${RUN_ID:-}" ] || [ -z "$created" ] || [ -z "$cancelled_at" ]; then
+    echo "::warning::Cannot tell whether the cancelled Fast Gate run was superseded" \
+         "(missing RUN_ID or run timestamps)."
+    return 0
+  fi
+
+  if ! jobs="$(gh api --method GET \
+    "repos/$REPO/actions/runs/$gid/attempts/$attempt/jobs" -f per_page=1 2>/dev/null)"; then
+    echo "::warning::Could not read the jobs of the cancelled Fast Gate run $gid," \
+         "so it is not treated as superseded."
+    return 0
+  fi
+  njobs="$(printf '%s' "$jobs" | jq -r '.total_count // "unknown"' 2>/dev/null || echo unknown)"
+  if [ "$njobs" != "0" ]; then
+    # It started (or its jobs could not be counted): a gate that ran on this
+    # commit and was then cancelled is a verdict, and it fails closed.
+    return 0
+  fi
+
+  if ! others="$(gh api --method GET \
+    "repos/$REPO/actions/workflows/fast-gate.yml/runs" \
+    -f "event=push" -f "branch=$BRANCH" -f per_page=100 2>/dev/null)"; then
+    echo "::warning::Could not list Fast Gate runs on $BRANCH, so the cancelled" \
+         "run $gid is not treated as superseded."
+    return 0
+  fi
+  evictor="$(printf '%s' "$others" \
+    | jq -r --arg branch "$BRANCH" --arg repo "$HEAD_REPO" --argjson gid "$gid" \
+        --arg from "$created" --arg to "$cancelled_at" --argjson slack "$SUPERSEDE_SLACK" \
+        '(.workflow_runs // [])
+         | map(select(.id != $gid
+                      and .event == "push"
+                      and .head_branch == $branch
+                      and .head_repository.full_name == $repo
+                      and (.run_started_at // "") != ""))
+         | map(select((.run_started_at | fromdateiso8601) as $t
+                      | $t >= ($from | fromdateiso8601)
+                        and $t <= (($to | fromdateiso8601) + $slack)))
+         | if length == 0 then ""
+           else (min_by((.run_started_at | fromdateiso8601) - ($to | fromdateiso8601)
+                        | if . < 0 then -. else . end)
+                 | "\(.html_url) (\(.head_sha[0:10]))") end' \
+        2>/dev/null || echo "")"
+  if [ -z "$evictor" ]; then
+    return 0
+  fi
+
+  echo "::warning::Fast Gate run $gurl never started: it was evicted from its" \
+       "concurrency group when $evictor entered it. Nothing judged this commit," \
+       "so this run cancels itself instead of reporting a failure. For a verdict" \
+       "on this commit, re-run that Fast Gate run, then this run."
+  err="${TMPDIR:-/tmp}/await-fg-cancel.$$"
+  if ! gh api --method POST "repos/$REPO/actions/runs/$RUN_ID/cancel" >/dev/null 2>"$err"; then
+    echo "::error::Could not cancel this run ($(head -c 300 "$err" 2>/dev/null | tr '\n' ' '))," \
+         "so it fails closed instead."
+    rm -f "$err"
+    return 0
+  fi
+  rm -f "$err"
+  asked="$(now)"
+  while [ $(( $(now) - asked )) -lt "$CANCEL_BUDGET" ]; do
+    nap 10
+  done
+  echo "::error::This run was asked to cancel itself but is still running after" \
+       "${CANCEL_BUDGET}s, so it fails closed and the matrix stays unreleased."
+  exit 1
+}
 
 started="$(now)"
 seen=false
@@ -126,6 +230,12 @@ while :; do
   fi
 
   if [ "$status" = "completed" ]; then
+    # A push's gate run evicted before it started is superseded, not decided:
+    # proven, this run cancels itself and never returns; otherwise the case
+    # below fails closed on `cancelled` like any other non-success.
+    if [ "$conclusion" = "cancelled" ] && [ "$EVENT" = "push" ]; then
+      cancel_if_superseded "$latest"
+    fi
     case "$conclusion" in
       success)
         echo "Fast Gate passed. Releasing the heavy jobs."

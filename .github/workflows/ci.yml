@@ -403,6 +403,14 @@ jobs:
   # way, so it is polled as pending. A barrier that passed when it could
   # not read its subject would be worse than no barrier, because the matrix would
   # run anyway and the log would claim it was cleared to.
+  #
+  # One cancelled gate is not a verdict: on a push to main, a Fast Gate run
+  # evicted from its concurrency group before it started (another run entered
+  # the group) judged nothing. When the script proves that from the run's jobs
+  # and the group's listing, it cancels THIS run, which then concludes
+  # `cancelled` like a CI run evicted from its own group, instead of `failure`.
+  # It never releases the matrix on that path, and any read or proof that fails
+  # leaves the run failing closed.
   await-fast-gate:
     name: Await Fast Gate
     # Skipped on a push to main only while MERGE_QUEUE_ENABLED is 'true': the
@@ -413,9 +421,12 @@ jobs:
     runs-on: ${{ github.repository == 'kirodotdev/KiroCrew' && contains(fromJSON(vars.CODEBUILD_ACTOR_IDS || '[]'), github.actor_id) && (github.event_name == 'push' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action == 'opened' || github.event.action == 'synchronize') && github.event.pull_request.head.repo.full_name == github.repository)) && format('codebuild-kirocrew-gha-linux-{0}-{1}', github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 15
     permissions:
-      # actions:read is what lets this read another workflow's runs. Job-level
-      # permissions REPLACE the top-level grant, so contents:read is restated.
-      actions: read
+      # actions:read is what lets this read another workflow's runs; actions:write
+      # adds the one write the script makes, cancelling this run on a push whose
+      # Fast Gate run was superseded. Fork pull requests still get a read-only
+      # token. Job-level permissions REPLACE the top-level grant, so
+      # contents:read is restated.
+      actions: write
       contents: read
     steps:
       # The poll body lives in a script on disk, so the file has to be present
@@ -460,6 +471,8 @@ jobs:
           # re-verified on the run that is selected.
           BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
           HEAD_REPO: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          # This run's own id, the only run the script ever cancels.
+          RUN_ID: ${{ github.run_id }}
         # The poll lives in a script so its whole control flow -- not just the
         # jq selector and the conclusion case -- can be run against a stubbed gh
         # and a fake clock (test_await_fast_gate_poll.py). The identity of the

@@ -484,18 +484,36 @@ class TestTheBarrierFailsClosed:
         # has to outlast the poll budget, or the step is killed before it can report
         # its own fail-closed verdict and the job reports a timeout instead.
         total = int(script.split("TOTAL_BUDGET:-", 1)[1].split("}", 1)[0].strip())
+        # A superseded push spends up to CANCEL_BUDGET more after the poll, waiting
+        # for its own cancellation to land.
+        cancel = int(script.split("\nCANCEL_BUDGET=", 1)[1].split("\n", 1)[0].strip())
         cap_seconds = int(ci["jobs"]["await-fast-gate"]["timeout-minutes"]) * 60
-        assert cap_seconds > total, (
-            f"timeout-minutes ({cap_seconds}s) must exceed TOTAL_BUDGET ({total}s) so "
-            "the step reports the verdict rather than being killed mid-poll"
+        assert cap_seconds > total + cancel, (
+            f"timeout-minutes ({cap_seconds}s) must exceed TOTAL_BUDGET ({total}s) plus "
+            f"CANCEL_BUDGET ({cancel}s) so the step reports the verdict rather than "
+            "being killed mid-poll"
         )
 
     def test_reading_another_workflows_runs_is_granted_explicitly(self, ci: dict) -> None:
-        # Job-level permissions REPLACE the top-level grant, so actions:read has to be
-        # restated here or the API read 404s and the barrier fails closed on every run.
+        # Job-level permissions REPLACE the top-level grant, so the actions grant has
+        # to be restated here or the API read 404s and the barrier fails closed on
+        # every run. It is `write` because the barrier cancels its own run when a
+        # push's Fast Gate run was superseded; nothing else in the job writes.
         perms = ci["jobs"]["await-fast-gate"]["permissions"]
-        assert perms.get("actions") == "read"
-        assert perms.get("contents") == "read"
+        assert perms == {"actions": "write", "contents": "read"}
+
+    def test_the_only_write_is_cancelling_this_run(self, barrier_script: str) -> None:
+        # actions:write would also let the job re-run, cancel or delete OTHER runs.
+        # The script's one POST names this run's own id, so the grant is used for
+        # nothing else.
+        posts = [ln for ln in barrier_script.splitlines() if "--method POST" in ln]
+        assert posts and all('actions/runs/$RUN_ID/cancel"' in ln for ln in posts), posts
+        # `gh api` with -f fields defaults to POST, so every call names its method.
+        calls = [ln for ln in barrier_script.splitlines() if "gh api" in ln and "#" not in ln]
+        assert calls and all("--method GET" in ln or ln in posts for ln in calls), calls
+        assert "--method DELETE" not in barrier_script
+        assert "--method PUT" not in barrier_script
+        assert "rerun" not in barrier_script
 
 
 class TestTheEdgeReachesEveryExpensiveJob:
