@@ -8476,7 +8476,9 @@ async def _end_turn_tail(
         slot._turn_channel_narrowed = False
         slot._turn_channel_origin = False
         slot._turn_user_sent = False
-        note_turn_self_arm(slot.key, False)
+    # Every frame: the depth-1 ``/prompts get`` re-entry owns the turn's tail
+    # (its depth-0 caller hands off), so its exit IS the turn's end.
+    note_turn_self_arm(slot.key, False)
     # A healthy `wait` clears its own state with a final keepalive ping, but
     # that ping is best-effort and cannot run at all if the MCP subprocess died
     # mid-sleep (hard stop, crash, gateway abort). Clearing at turn end is the
@@ -8962,9 +8964,13 @@ async def _run_chat(
         slot._turn_channel_narrowed = False
         slot._turn_channel_origin = bool(_directive_channel_origin)
         slot._turn_user_sent = bool(_directive_user_origin) and not _directive_channel_origin
-        # Spawns from this turn are the slot's own only if the turn could self-arm.
+        # Only a user-sent turn's spawns count as the slot's own: a wake's or a
+        # digest's would let a loop the user stopped re-arm itself (fail closed).
         note_turn_self_arm(
-            slot.key, _directive_user_origin or _directive_self_wake or _directive_own_subagent
+            slot.key,
+            bool(_directive_user_origin)
+            and not _directive_self_wake
+            and not _directive_own_subagent,
         )
     # Dispatch appends the triggering row before entering this runner. Freeze
     # that row now, before await points, prompt expansion or new deliveries.

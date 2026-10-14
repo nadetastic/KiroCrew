@@ -131,7 +131,7 @@ async def test_a_spawn_naming_the_member_as_parent_stays_refused(env, shape) -> 
     assert result.endswith("[status 409]")
     assert svc.added == []
     assert "this turn was started by a sub-agent result" in result
-    assert "retry in a user-sent turn" in result
+    assert "send the request yourself in this chat" in result
 
 
 @pytest.mark.asyncio
@@ -160,8 +160,8 @@ def test_only_the_turn_runner_stamps_turn_eligibility() -> None:
         ({}, True),  # a user-sent turn
         ({"_directive_user_origin": False, "_turn_actor": "cron"}, False),
         ({"_directive_user_origin": False, "_turn_actor": "app"}, False),
-        ({"_directive_user_origin": False, "_directive_self_wake": True}, True),
-        ({"_directive_user_origin": False, "_directive_own_subagent": True}, True),
+        ({"_directive_user_origin": False, "_directive_self_wake": True}, False),
+        ({"_directive_user_origin": False, "_directive_own_subagent": True}, False),
     ],
 )
 def test_a_real_turn_stamps_its_eligibility_and_clears_it(run_kwargs, eligible) -> None:
@@ -180,12 +180,211 @@ def test_a_real_turn_stamps_its_eligibility_and_clears_it(run_kwargs, eligible) 
     assert seen["key"] not in sda._TURN_MAY_SELF_ARM, "cleared at the turn's end"
 
 
+@pytest.mark.parametrize("producer", ["_directive_self_wake", "_directive_own_subagent"])
+def test_a_wake_or_digest_spawned_childs_digest_is_refused(env, producer) -> None:  # noqa: F811
+    """A loop the user stopped must not re-arm through a child its wake spawned."""
+    import asyncio
+
+    from turn_harness import Do, TurnScript, run_turn
+
+    seen: dict[str, bool] = {}
+
+    def _during(ctx: Any) -> None:
+        seen["eligible"] = ctx.slot.key in sda._TURN_MAY_SELF_ARM
+
+    kwargs = {"_directive_user_origin": False, producer: True}
+    asyncio.run(run_turn(TurnScript(events=(Do(_during),), run_kwargs=kwargs)))
+    assert seen["eligible"] is False
+
+    async def _spawn_then_digest() -> tuple[str, _Svc]:
+        assert await _spawn(env, "internal", turn_eligible=seen["eligible"]) == 200
+        return await _digest_arms()
+
+    result, svc = asyncio.run(_spawn_then_digest())
+    assert result.endswith("[status 409]") and svc.added == []
+
+
+def test_a_prompts_get_turn_clears_its_eligibility_at_its_end() -> None:
+    """``/prompts get`` re-enters at depth 1 and hands that frame the turn's tail."""
+    import asyncio
+
+    from turn_harness import Do, TurnScript, run_turn
+
+    seen: dict[str, Any] = {}
+
+    def _during(ctx: Any) -> None:
+        seen["key"] = ctx.slot.key
+        seen["inside"] = ctx.slot.key in sda._TURN_MAY_SELF_ARM
+
+    script = TurnScript(message="/prompts get demo", events=(Do(_during),))
+    with mock.patch(
+        "kiro_crew.dashboard.chat_runner._resolve_prompt_mention",
+        lambda message, project_dir: ("expanded prompt body", "ok", ""),
+    ):
+        asyncio.run(run_turn(script))
+    assert seen["inside"] is True, "the expanded turn ran as the user-sent turn"
+    assert seen["key"] not in sda._TURN_MAY_SELF_ARM, "cleared at the turn's end"
+
+
 @pytest.mark.asyncio
 async def test_an_unattested_spawn_taints_its_wave(env) -> None:  # noqa: F811
     assert await _spawn(env, "internal", "run-1") == 200
     assert await _spawn(env, "app", "run-2") == 200
     result, svc = await _digest_arms("run-1")
     assert result.endswith("[status 409]") and svc.added == []
+
+
+async def _lost(env: Any, shape: str) -> int:  # noqa: F811
+    """POST /api/spawn/lost for wave b1, whose ``reason`` lands in the digest."""
+    from kiro_crew.dashboard.handlers import messaging
+
+    env.state.subagents = SimpleNamespace(record_lost_submission=mock.Mock())
+    req = make_request(
+        env.state,
+        "/api/spawn/lost",
+        body={"batch_id": "b1", "batch_total": 2, "reason": "x", "parent_session": PARENT},
+        owner=shape == "owner",
+        internal=shape == "internal",
+    )
+    if shape == "app":
+        req["app"] = "issue-radar"
+    response = await messaging.api_spawn_lost(req)
+    env.state.subagents.record_lost_submission.assert_called_once()
+    return response.status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("shape", "arms"), [("internal", True), ("owner", False), ("app", False)])
+async def test_an_unattested_lost_report_taints_its_wave(env, shape, arms) -> None:  # noqa: F811
+    assert await _spawn(env, "internal", "run-1") == 200
+    assert await _lost(env, shape) == 200
+    result, svc = await _digest_arms("run-1")
+    assert (len(svc.added) == 1) is arms
+    assert result.endswith("[status 409]") is not arms
+
+
+_CHILD = SimpleNamespace(
+    id="run-1",
+    parent_session_key=PARENT,
+    batch_id="b1",
+    done=True,
+    outcome="failed",
+    agent="",
+    task="triage",
+    _raw_task="triage",
+    cwd="",
+    max_turns=0,
+    model="",
+    reasoning_effort=None,
+    backend=None,
+    approval_mode="",
+    silent=False,
+    delegation={},
+    include_memory=False,
+    include_lessons=False,
+    include_project=False,
+    memory_store="",
+    crew="",
+    execution_context=SimpleNamespace(app="", memory_mode="persistent", to_record=dict),
+)
+
+
+async def _child_write(
+    env: Any, route: str, shape: str, *, turn_eligible: bool  # noqa: F811
+) -> int:
+    """Write into the attested child ``run-1`` through *route* as *shape*."""
+    from kiro_crew.dashboard.handlers import messaging
+
+    sda.note_turn_self_arm("alice", turn_eligible)
+    started = SimpleNamespace(id="run-9", done=False, error="")
+    env.state.subagents = SimpleNamespace(
+        get=lambda _id: _CHILD,
+        steer_run=mock.AsyncMock(return_value=(True, "")),
+        follow_up_run=mock.AsyncMock(return_value=(True, "")),
+        claim_retry=lambda _old: None,
+        settle_retry=lambda *_a: None,
+        recorded_cwd=lambda _id: "",
+        max_concurrent=4,
+    )
+    body: dict[str, Any] = {
+        "steer": {"message": "x"},
+        "follow_up": {"message": "x", "mode": "follow_up"},
+        "continue": {"task": "x", "parent_session": PARENT},
+        "retry": {},
+    }[route]
+    req = make_request(
+        env.state,
+        f"/api/spawn/run-1/{'steer' if route == 'follow_up' else route}",
+        body=body,
+        owner=shape == "owner",
+        internal=shape == "internal",
+        match_info={"agent_id": "run-1"},
+    )
+    handler = {
+        "steer": messaging.api_spawn_steer,
+        "follow_up": messaging.api_spawn_steer,
+        "continue": messaging.api_spawn_continue,
+        "retry": messaging.api_spawn_retry,
+    }[route]
+    with (
+        mock.patch.object(messaging, "_continue_on_loop", mock.AsyncMock(return_value=started)),
+        mock.patch.object(messaging, "_spawn_on_loop", mock.AsyncMock(return_value=started)),
+    ):
+        response = await handler(req)
+    return response.status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["steer", "follow_up", "continue", "retry"])
+@pytest.mark.parametrize(
+    ("shape", "turn_eligible", "arms"),
+    [("internal", True, True), ("internal", False, False), ("owner", True, False)],
+)
+async def test_a_child_write_keeps_self_arm_only_from_a_user_turn(
+    env, route, shape, turn_eligible, arms  # noqa: F811
+) -> None:
+    """Steer (both modes), continue and retry: a non-user write revokes and taints."""
+    assert await _spawn(env, "internal", "run-1") == 200
+    assert await _child_write(env, route, shape, turn_eligible=turn_eligible) == 200
+    result, svc = await _digest_arms("run-1")
+    assert (len(svc.added) == 1) is arms, result
+    if route == "continue":
+        assert sda.attested_own_subagent("run-9", PARENT, "") is arms
+    if route == "retry":  # the retried run never attests (fail closed)
+        assert sda.attested_own_subagent("run-9", PARENT, "") is False
+
+
+def test_every_child_write_route_goes_through_the_shared_gate() -> None:
+    """A route that writes into a child must call ``note_child_write``; a new one
+    that reaches a child-write manager method without it fails here."""
+    import ast
+
+    import kiro_crew
+
+    writes = {
+        "_spawn_on_loop",
+        "_continue_on_loop",
+        "steer_run",
+        "follow_up_run",
+        "record_lost_submission",
+        "claim_retry",
+    }
+    owners = Path(kiro_crew.__file__).resolve().parent / "dashboard" / "messaging_api"
+    found: dict[str, bool] = {}
+    for path in owners.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in tree.body:
+            if not isinstance(fn, ast.AsyncFunctionDef) or not fn.name.startswith("api_"):
+                continue
+            names = {
+                getattr(n.func, "attr", getattr(n.func, "id", ""))
+                for n in ast.walk(fn)
+                if isinstance(n, ast.Call)
+            }
+            if names & writes:
+                found[fn.name] = bool(names & {"note_child_write", "note_write_into_child"})
+    assert sorted(found) == sorted(sda.CHILD_WRITE_ROUTES)
+    assert all(found.values()), found
 
 
 def test_taint_overflow_latches_attestation_off(_floor_monkeypatch: pytest.MonkeyPatch) -> None:

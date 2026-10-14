@@ -522,7 +522,7 @@ async def test_refused_arm_writes_a_notice_row_into_the_session(kind: str) -> No
         )
 
     assert result.startswith("Failed to start")
-    assert "member-mode" in result
+    assert "this turn was started by" in result
     audit.assert_called_with("dashboard:member-conductor", kind, "denied")
     surfaced.assert_called_once()
     called_state, called_slot, role, text, cls = surfaced.call_args.args
@@ -530,7 +530,7 @@ async def test_refused_arm_writes_a_notice_row_into_the_session(kind: str) -> No
     assert role == "notice" and cls == "msg msg-info"
     assert text.startswith(sda.ARM_REFUSAL_NOTICE_PREFIX)
     # This consumer's own non-user turn earned the refusal, so it is reworded.
-    assert "retry in a user-sent turn" in text
+    assert "send the request yourself in this chat" in text
 
 
 @pytest.mark.asyncio
@@ -575,7 +575,7 @@ async def test_notice_failure_never_masks_the_denial() -> None:
             "monitor_start",
             {"message": "m"},
         )
-    assert result.startswith("Failed to start monitor loop: crew-mode")
+    assert result.startswith("Failed to start monitor loop: this turn was started by")
 
 
 # ── fire-time re-check honours the record ──────────────────────────────────
@@ -775,7 +775,7 @@ async def test_refused_monitor_start_carries_the_status_code() -> None:
             "monitor_start",
             {"message": "patrol"},
         )
-    assert result.startswith("Failed to start monitor loop: member-mode")
+    assert result.startswith("Failed to start monitor loop: this turn was started by")
     assert result.endswith("[status 409]")
 
 
@@ -809,9 +809,9 @@ async def test_an_origin_refused_self_arm_says_why_and_stays_refused(
     assert svc.added == [] and svc.added_monitors == []
     assert [event["outcome"] for event in audits] == ["denied"]
     assert f"this turn was started by {origin}" in result
-    assert "retry in a user-sent turn" in result
+    assert "send the request yourself in this chat" in result
     assert "armed from outside the session" not in result
-    assert "retry in a user-sent turn" in surfaced.call_args.args[3]
+    assert "send the request yourself in this chat" in surfaced.call_args.args[3]
 
 
 def test_a_foreign_initiator_keeps_the_original_refusal() -> None:
@@ -1425,8 +1425,8 @@ class TestLegacyLoopUpdateOnAMemberSlotKeepsTheSelfArmRule:
     async def test_an_outside_turn_is_refused_before_the_write(self, mode: str) -> None:
         result, captured = await self._apply(mode)  # no provenance mark
         assert captured == {}, "the legacy chokepoint was never reached"
-        assert result.startswith(f"Failed to update monitor loop: {mode}-mode sessions can run")
-        assert result.endswith("retry in a user-sent turn")
+        assert result.startswith("Failed to update monitor loop: this turn was started by")
+        assert result.endswith("send the request yourself in this chat.")
 
     @pytest.mark.asyncio
     async def test_the_refusal_is_audited_denied(self) -> None:

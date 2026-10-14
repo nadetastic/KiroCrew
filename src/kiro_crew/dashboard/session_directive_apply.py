@@ -705,10 +705,41 @@ def note_turn_self_arm(slot_key: str, eligible: bool) -> None:
 
 
 def spawner_attested(scope: Any, parent: str, slot: Any) -> bool:
-    """The transport-attested caller IS *parent* AND its current turn could self-arm:
-    a cron or app turn runs in the member's own slot with the same attested MCP."""
+    """The transport-attested caller IS *parent* AND its current turn is user-sent:
+    a cron, app, wake or digest turn runs in the slot with the same attested MCP."""
     eligible = getattr(slot, "key", None) in _TURN_MAY_SELF_ARM
     return bool(scope.verified and parent and scope.session == parent and eligible)
+
+
+#: Every route that writes into or restarts a child calls :func:`note_child_write`
+#: first; ``test_subagent_digest_self_arm`` pins this list against the source.
+CHILD_WRITE_ROUTES = (
+    "api_spawn",
+    "api_spawn_continue",
+    "api_spawn_lost",
+    "api_spawn_retry",
+    "api_spawn_steer",
+)
+
+
+def note_child_write(scope: Any, agent_id: str, parent: str, batch_id: str, slot: Any) -> bool:
+    """Gate one write into child *agent_id* (``""`` before it has an id).
+
+    Only *parent*'s own user-sent turn keeps the child's digest trusted. Any other
+    writer revokes the child's attestation and taints its wave, so text it put
+    there never reaches a digest with self-arm authority. Returns the verdict."""
+    attested = spawner_attested(scope, parent, slot)
+    if not attested:
+        note_spawner(agent_id, parent, batch_id, attested=False)
+    return attested
+
+
+def note_write_into_child(scope: Any, agent_id: str, child: Any, slot_of: Any) -> bool:
+    """:func:`note_child_write` for an existing *child*, its parent and wave read off
+    the record (never the body). *slot_of* maps a parent key to its slot."""
+    parent = str(getattr(child, "parent_session_key", "") or "")
+    batch_id = str(getattr(child, "batch_id", "") or "")
+    return note_child_write(scope, agent_id, parent, batch_id, slot_of(parent))
 
 
 def attested_own_subagent(agent_id: str, parent: str, batch_id: str) -> bool:
@@ -730,10 +761,9 @@ def _origin_arm_refusal(reason: str, turn_actor: str) -> str:
     for mode in sorted(_EXTERNAL_ARM_REFUSED_MODES):
         reason = reason.replace(
             external_arm_refusal(mode),
-            f"{mode}-mode sessions can run loops, but only a turn the user sent, this "
-            "session's own loop wake, or results of sub-agents this session spawned may "
-            f"arm one, and this turn was started by {origin}. Ask the user to send the "
-            "request, or retry in a user-sent turn",
+            # The notice row shows this to the person, so it speaks to them.
+            f"this turn was started by {origin}, so it cannot start or change a loop. "
+            "To do it, send the request yourself in this chat.",
         )
     return reason
 

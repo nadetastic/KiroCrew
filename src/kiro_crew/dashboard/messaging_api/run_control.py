@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         _redact,
         _run_belongs_to_caller,
         _sel,
+        _slot_for_parent,
         _spawn_on_loop,
         dashboard_slot_key,
         effective_session_key,
@@ -276,6 +277,15 @@ async def api_spawn_steer(request: web.Request) -> web.Response:
             {"error": "mode must be 'interrupt' or 'follow_up'", "code": "invalid_mode"},
             status=400,
         )
+    from kiro_crew.dashboard.handlers._shared import member_request_scope
+    from kiro_crew.dashboard.session_directive_apply import note_write_into_child
+
+    note_write_into_child(
+        await member_request_scope(request),
+        agent_id,
+        state.subagents.get(agent_id),
+        lambda p: _slot_for_parent(state, p),
+    )
     if mode == "follow_up":
         ok, detail = await state.subagents.follow_up_run(agent_id, message)
     else:
@@ -388,6 +398,12 @@ async def api_spawn_lost(request: web.Request) -> web.Response:
     )
     if refusal is not None:
         return refusal
+    from kiro_crew.dashboard.handlers._shared import member_request_scope
+    from kiro_crew.dashboard.session_directive_apply import note_child_write
+
+    # The caller's ``reason`` lands in the wave's digest: a child write like any other.
+    caller = await member_request_scope(request)
+    note_child_write(caller, "", parent_session, batch_id, _slot_for_parent(state, parent_session))
     state.subagents.record_lost_submission(
         batch_id, batch_total, reason, parent_session_key=parent_session
     )
@@ -514,6 +530,13 @@ async def api_spawn_retry(request: web.Request) -> web.Response:
             },
             status=409,
         )
+    from kiro_crew.dashboard.handlers._shared import member_request_scope
+    from kiro_crew.dashboard.session_directive_apply import note_write_into_child
+
+    # The retried run is never attested (fail closed); this revokes the old one.
+    note_write_into_child(
+        await member_request_scope(request), agent_id, old, lambda p: _slot_for_parent(state, p)
+    )
     try:
         return await _retry_failed_run(state, agent_id, old)
     finally:

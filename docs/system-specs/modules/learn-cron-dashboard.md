@@ -5187,10 +5187,17 @@ through `_run_chat(_directive_own_subagent=True)`). `POST /api/spawn` and
 `/api/spawn/{id}/continue` record the spawner from the caller's transport
 identity (`member_request_scope`: kernel peer or signed session token, never
 the body's `parent_session`) via `session_directive_apply.note_spawner`, and
-only while the parent slot's CURRENT turn could itself self-arm (`chat_runner`
-stamps `note_turn_self_arm` at each turn's start and clears it at its end:
-user turn, own loop wake, or such a digest). A cron or app turn runs in the
-member's slot with the same attested MCP, so its spawns are not attested. The
+only while the parent slot's CURRENT turn is user-sent (`chat_runner`
+stamps `note_turn_self_arm` at each turn's start and clears it at every frame's
+end). A cron, app, loop-wake or digest turn runs in the member's slot with the
+same attested MCP, so its spawns are not attested: a loop the user stopped
+cannot re-arm through a child its wake spawned. Every route that writes into or
+restarts a child (`session_directive_apply.CHILD_WRITE_ROUTES`: spawn, continue,
+`/api/spawn/lost`, retry, and steer in both `interrupt` and `follow_up` modes)
+calls the one shared gate `note_child_write` first: unless the writer is the
+parent's own user-sent turn, it revokes the child's attestation and taints its
+wave, and a retried run never attests. A source ratchet fails any new
+`api_*` route that reaches a child-write manager call without the gate. The
 digest qualifies only when `attested_own_subagent` finds that spawner equal to
 the parent AND no unattested spawn (owner browser, app token, ineligible turn)
 used its batch id under ANY parent (the gateway groups a wave by batch id

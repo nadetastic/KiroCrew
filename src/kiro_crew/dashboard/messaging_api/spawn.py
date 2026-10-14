@@ -361,13 +361,13 @@ async def api_spawn(request: web.Request) -> web.Response:
     # on-loop, cache-only agent validation inside spawn() is a hit.
     if agent:
         await warm_project_agents_for_spawn(state, cwd)
-    from kiro_crew.dashboard.session_directive_apply import note_spawner, spawner_attested
+    from kiro_crew.dashboard.session_directive_apply import note_child_write, note_spawner
 
     # The spawner is the TRANSPORT-attested caller, never the body's parent_session:
     # an owner-browser or app-token spawn may name any parent and attests nothing.
-    attested = spawner_attested(caller, parent_session, _slot_for_parent(state, parent_session))
-    if not attested:
-        note_spawner("", parent_session, batch_id, attested=False)
+    attested = note_child_write(
+        caller, "", parent_session, batch_id, _slot_for_parent(state, parent_session)
+    )
     info = await _spawn_on_loop(
         state,
         task,
@@ -581,11 +581,12 @@ async def api_spawn_continue(request: web.Request) -> web.Response:
     # responsive even when the recorded path lives on a stalled mount.
     resumed_cwd = await asyncio.to_thread(state.subagents.recorded_cwd, conv_id)
     from kiro_crew.dashboard.handlers._shared import member_request_scope
-    from kiro_crew.dashboard.session_directive_apply import note_spawner, spawner_attested
+    from kiro_crew.dashboard.session_directive_apply import note_child_write, note_spawner
 
     caller = await member_request_scope(request)
-    attested = spawner_attested(caller, parent_session, _slot_for_parent(state, parent_session))
-    note_spawner(conv_id, parent_session, "", attested=False)
+    attested = note_child_write(
+        caller, conv_id, parent_session, "", _slot_for_parent(state, parent_session)
+    )
     info = await _continue_on_loop(
         state,
         conv_id,
