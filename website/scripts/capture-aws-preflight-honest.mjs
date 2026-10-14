@@ -163,6 +163,9 @@ for (const theme of ['dark', 'light']) {
     fail(`${theme}: the row must say where the plugin was found: ${JSON.stringify(text)}`)
   }
   if (!/owned by another user \(uid 1501\)/.test(text)) fail(`${theme}: the row must give the reason`)
+  if (!/reinstall it from AWS first\. Then run the command below/.test(text)) {
+    fail(`${theme}: the row must ask for AWS provenance before the ownership command`)
+  }
   if (!/sudo chown -R root:wheel \/usr\/local\/sessionmanagerplugin/.test(text)) {
     fail(`${theme}: the copyable command must be the chown that clears the refusal`)
   }

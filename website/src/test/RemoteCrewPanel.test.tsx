@@ -675,6 +675,11 @@ describe('RemoteCrewPanel', () => {
       await screen.findByText(/Found at \/usr\/local\/sessionmanagerplugin\/bin\/session-manager-plugin.*owned by another user \(uid 1501\).*root-owned/),
     ).toBeInTheDocument()
     expect(screen.getByText('sudo chown -R root:wheel /usr/local/sessionmanagerplugin')).toBeInTheDocument()
+    // Making the tree root-owned makes whatever binary is in it an accepted
+    // credential receiver, so the line asks for AWS provenance before the command.
+    expect(
+      screen.getByText(/reinstall it from AWS first\. Then run the command below to make its install folder root-owned/),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/Not installed/)).not.toBeInTheDocument()
     // A refusal is a failed check, so it renders through ErrorNotice with the
     // agent hand-off, not as muted status text.

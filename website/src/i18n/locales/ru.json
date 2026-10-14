@@ -18080,7 +18080,7 @@
         "plugin_missing": "Не установлен — нужен, чтобы подключиться к команде без открытия SSH-порта.",
         "plugin_ok": "Installed.",
         "plugin_refused": "Найден в {{path}}, но {{productName}} не будет его запускать: {{reason}}. Исправь владельца или права доступа к файлу, затем проверь снова.",
-        "plugin_refused_fix": "Найден в {{path}}, но {{productName}} не будет его запускать: {{reason}}. Выполни команду ниже, чтобы папка установки принадлежала root, затем проверь снова.",
+        "plugin_refused_fix": "Найден в {{path}}, но {{productName}} не будет его запускать: {{reason}}. Если плагин установлен не из AWS или это неизвестно, сначала переустанови его из AWS. Затем выполни команду ниже, чтобы папка установки принадлежала root, и проверь снова.",
         "port_must_be_in_range": "Укажите порт от 1 до 65535.",
         "prereq_cloudformation": "CloudFormation access",
         "prereq_credentials": "AWS credentials",

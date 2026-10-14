@@ -662,6 +662,10 @@ class TestDoctor:
         )
         assert "owned by another user (uid 1501)" in out
         assert "sudo chown -R root:wheel /usr/local/sessionmanagerplugin" in out
+        # The command makes whatever binary is in the tree an accepted credential
+        # receiver, so the remedy asks for AWS provenance before it.
+        assert "reinstall it from AWS first" in out
+        assert out.index("reinstall it from AWS first") < out.index("sudo chown -R root:wheel")
         assert "session-manager-plugin not found" not in out
 
 

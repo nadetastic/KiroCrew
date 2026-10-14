@@ -182,7 +182,13 @@ gateway started from the Dock or Finder has a minimal `PATH`.
   receives your AWS credentials must pass, so reinstalling it the same way does not
   help. AWS's macOS package installs `/usr/local/sessionmanagerplugin` owned by its
   build account, and for that case the row offers the fix: `sudo chown -R root:wheel
-  /usr/local/sessionmanagerplugin`. `kirocrew cloud doctor` reports the same.
+  /usr/local/sessionmanagerplugin`. Run it only for a plugin that came from AWS.
+  Making the folder root-owned makes whatever binary is in it a trusted receiver
+  of your AWS credentials, and the account named in the reason could have replaced
+  that binary. If you did not install the plugin from AWS yourself, or are not
+  sure, reinstall it from
+  [AWS's install page](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+  first, then run the command. `kirocrew cloud doctor` reports the same.
 
 ### Non-fatal warnings you can ignore
 

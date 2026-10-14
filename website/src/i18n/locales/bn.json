@@ -17572,7 +17572,7 @@
         "plugin_missing": "ইনস্টল করা নেই — কোনো SSH পোর্ট না খুলে ক্রুতে পৌঁছাতে এটি দরকার।",
         "plugin_ok": "Installed.",
         "plugin_refused": "{{path}}-এ পাওয়া গেছে, কিন্তু {{productName}} এটি চালাবে না: {{reason}}। ফাইলের মালিকানা বা অনুমতি ঠিক করো, তারপর আবার যাচাই করো।",
-        "plugin_refused_fix": "{{path}}-এ পাওয়া গেছে, কিন্তু {{productName}} এটি চালাবে না: {{reason}}। নিচের কমান্ডটি চালাও, যাতে ইনস্টল ফোল্ডারের মালিক root হয়, তারপর আবার যাচাই করো।",
+        "plugin_refused_fix": "{{path}}-এ পাওয়া গেছে, কিন্তু {{productName}} এটি চালাবে না: {{reason}}। তুমি যদি নিজে AWS থেকে এটি ইনস্টল না করে থাকো, বা নিশ্চিত না হও, তাহলে আগে AWS থেকে আবার ইনস্টল করো। তারপর নিচের কমান্ডটি চালাও, যাতে ইনস্টল ফোল্ডারের মালিক root হয়, এবং আবার যাচাই করো।",
         "port_must_be_in_range": "১ থেকে ৬৫৫৩৫ এর মধ্যে একটি পোর্ট দিন।",
         "prereq_cloudformation": "CloudFormation access",
         "prereq_credentials": "AWS credentials",

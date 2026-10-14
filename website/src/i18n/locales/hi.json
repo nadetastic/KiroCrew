@@ -17572,7 +17572,7 @@
         "plugin_missing": "इंस्टॉल नहीं है — कोई SSH पोर्ट खोले बिना क्रू तक पहुँचने के लिए ज़रूरी है।",
         "plugin_ok": "Installed.",
         "plugin_refused": "{{path}} पर मिला, लेकिन {{productName}} इसे नहीं चलाएगा: {{reason}}। फ़ाइल का मालिक या अनुमतियाँ ठीक करो, फिर दोबारा जाँचो।",
-        "plugin_refused_fix": "{{path}} पर मिला, लेकिन {{productName}} इसे नहीं चलाएगा: {{reason}}। नीचे दी गई कमांड चलाओ ताकि इंस्टॉल फ़ोल्डर का मालिक root हो जाए, फिर दोबारा जाँचो।",
+        "plugin_refused_fix": "{{path}} पर मिला, लेकिन {{productName}} इसे नहीं चलाएगा: {{reason}}। अगर तुमने इसे खुद AWS से इंस्टॉल नहीं किया है, या पक्का नहीं है, तो पहले इसे AWS से दोबारा इंस्टॉल करो। फिर नीचे दी गई कमांड चलाओ ताकि इंस्टॉल फ़ोल्डर का मालिक root हो जाए, और दोबारा जाँचो।",
         "port_must_be_in_range": "1 से 65535 के बीच का पोर्ट दर्ज करें।",
         "prereq_cloudformation": "CloudFormation access",
         "prereq_credentials": "AWS credentials",

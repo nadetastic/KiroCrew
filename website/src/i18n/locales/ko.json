@@ -17318,7 +17318,7 @@
         "plugin_missing": "설치되지 않음 — SSH 포트를 열지 않고 크루에 연결하는 데 필요합니다.",
         "plugin_ok": "Installed.",
         "plugin_refused": "{{path}}에서 찾았지만 {{productName}}은(는) 이 파일을 실행하지 않습니다({{reason}}). 파일의 소유자나 권한을 수정한 뒤 다시 확인하세요.",
-        "plugin_refused_fix": "{{path}}에서 찾았지만 {{productName}}은(는) 이 파일을 실행하지 않습니다({{reason}}). 아래 명령을 실행해 설치 폴더의 소유자를 root로 바꾼 뒤 다시 확인하세요.",
+        "plugin_refused_fix": "{{path}}에서 찾았지만 {{productName}}은(는) 이 파일을 실행하지 않습니다({{reason}}). 직접 AWS에서 설치한 것이 아니거나 확실하지 않다면 먼저 AWS에서 다시 설치하세요. 그런 다음 아래 명령을 실행해 설치 폴더의 소유자를 root로 바꾸고 다시 확인하세요.",
         "port_must_be_in_range": "1에서 65535 사이의 포트를 입력하세요.",
         "prereq_cloudformation": "CloudFormation access",
         "prereq_credentials": "AWS credentials",

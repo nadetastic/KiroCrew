@@ -17318,7 +17318,7 @@
         "plugin_missing": "未安装 — 要在不开放任何 SSH 端口的情况下连接该 Crew，需要它。",
         "plugin_ok": "Installed.",
         "plugin_refused": "已在 {{path}} 找到，但 {{productName}} 不会运行它：{{reason}}。请修正该文件的所有者或权限，然后重新检查。",
-        "plugin_refused_fix": "已在 {{path}} 找到，但 {{productName}} 不会运行它：{{reason}}。请运行下方的命令，让安装文件夹归 root 所有，然后重新检查。",
+        "plugin_refused_fix": "已在 {{path}} 找到，但 {{productName}} 不会运行它：{{reason}}。如果它不是你亲自从 AWS 安装的，或你不确定，请先从 AWS 重新安装。然后运行下方的命令，让安装文件夹归 root 所有，再重新检查。",
         "port_must_be_in_range": "请输入 1 到 65535 之间的端口。",
         "prereq_cloudformation": "CloudFormation access",
         "prereq_credentials": "AWS credentials",

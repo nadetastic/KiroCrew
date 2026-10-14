@@ -557,8 +557,14 @@ def _cloud_doctor(args: argparse.Namespace) -> int:
     elif (refusal := ssm.session_manager_plugin_refusal()) is not None:
         ui.warn(f"session-manager-plugin found at {refusal.path} but refused: {refusal.reason}")
         if refusal.remedy_command:
+            # Making the tree root-owned turns whatever binary is in it into an
+            # accepted credential receiver, so the user confirms it is AWS's first.
             ui.detail(
-                f"Make its install directory root-owned, then rerun: {refusal.remedy_command}"
+                "If you did not install it from AWS yourself, or are not sure, reinstall "
+                "it from AWS first."
+            )
+            ui.detail(
+                f"Then make its install directory root-owned and rerun: {refusal.remedy_command}"
             )
         else:
             ui.detail("Fix the file's ownership or permissions so the check passes, then rerun.")

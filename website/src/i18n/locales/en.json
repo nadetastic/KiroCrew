@@ -9643,7 +9643,7 @@
         "plugin_missing": "Not installed — needed to reach the crew without opening any SSH port.",
         "plugin_ok": "Installed.",
         "plugin_refused": "Found at {{path}}, but {{productName}} will not run it: {{reason}}. Fix the file’s ownership or permissions, then re-check.",
-        "plugin_refused_fix": "Found at {{path}}, but {{productName}} will not run it: {{reason}}. Run the command below to make its install folder root-owned, then re-check.",
+        "plugin_refused_fix": "Found at {{path}}, but {{productName}} will not run it: {{reason}}. If you did not install it from AWS yourself, or are not sure, reinstall it from AWS first. Then run the command below to make its install folder root-owned, and re-check.",
         "port_must_be_in_range": "Enter a port between 1 and 65535.",
         "prereq_cloudformation": "CloudFormation access",
         "prereq_credentials": "AWS credentials",

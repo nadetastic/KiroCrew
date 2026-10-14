@@ -17826,7 +17826,7 @@
         "plugin_missing": "No instalado: hace falta para llegar al crew sin abrir ningún puerto SSH.",
         "plugin_ok": "Installed.",
         "plugin_refused": "Encontrado en {{path}}, pero {{productName}} no lo ejecutará: {{reason}}. Corrige el propietario o los permisos del archivo y vuelve a comprobar.",
-        "plugin_refused_fix": "Encontrado en {{path}}, pero {{productName}} no lo ejecutará: {{reason}}. Ejecuta el comando de abajo para que su carpeta de instalación pertenezca a root y vuelve a comprobar.",
+        "plugin_refused_fix": "Encontrado en {{path}}, pero {{productName}} no lo ejecutará: {{reason}}. Si no lo instalaste tú desde AWS, o no estás seguro, reinstálalo primero desde AWS. Después ejecuta el comando de abajo para que su carpeta de instalación pertenezca a root y vuelve a comprobar.",
         "port_must_be_in_range": "Introduce un puerto entre 1 y 65535.",
         "prereq_cloudformation": "CloudFormation access",
         "prereq_credentials": "AWS credentials",
