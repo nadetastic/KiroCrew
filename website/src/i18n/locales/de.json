@@ -16509,7 +16509,7 @@
         "category_taskrunner": "Aufgaben",
         "category_taskrunner_description": "Task Runner: abgeschlossene Läufe",
         "category_turn": "Gesprächsübergaben",
-        "category_turn_description": "Wenn ein Gespräch endet oder für deine Eingabe pausiert",
+        "category_turn_description": "Wenn ein Gespräch endet und dir die Kontrolle zurückgibt. Fragen spielen den Ton von „Genehmigungen und Fragen“.",
         "category_dictation": "Unterbrochenes Diktat",
         "category_dictation_description": "Spielt einen Ton ab, wenn das Diktat endet, bevor du es beendest",
         "channel_default": "Kanalstandard",

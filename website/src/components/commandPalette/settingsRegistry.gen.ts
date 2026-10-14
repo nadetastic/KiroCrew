@@ -2131,7 +2131,7 @@ export const SETTINGS_REGISTRY: SettingEntry[] =
     "type": "select",
     "occurrence": 1,
     "label": "Conversation handoffs",
-    "description": "When a conversation finishes or pauses for your input"
+    "description": "When a conversation finishes and hands control back to you. Questions play the “Approvals and questions” sound."
   },
   {
     "id": "notifications.sound-category-cron",
