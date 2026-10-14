@@ -568,16 +568,24 @@ A pod started by a build without the lifetime-Job protocol has no `.winrun`
 proof. Updating the build cannot retroactively contain that process tree.
 `pod down` and a new `pod up` deliberately refuse its remaining task, HOME or
 sidecars. This also applies to an unresolved reservation after an uncertain
-`/Run`, or when startup cancellation could not be persisted. A scheduled boot
-that refuses a missing checkout, venv or built dist also leaves `reserved`:
-those checks run before the publisher claims the generation. The producer can
-still be writing its refusal note, and the outer wrapper writes `.winresult`
-after Python returns. Neither file proves generation-bound producer retirement.
-These failed boots still require the verified retirement below; deleting only
-`.winrun` is neither safe retirement nor sufficient to clear the other evidence.
-By contrast, a persisted `cancelled` start has never attempted `/Run`: fix the
-reported cleanup error and repeat `pod up` to finish its generation-checked
-cleanup and retry.
+`/Run`, or when startup cancellation could not be persisted.
+
+A scheduled boot claims its reservation as the producer's first act, before the
+checkout, venv and dist checks, so the record names the `pod _run` process (pid
+plus creation time). A refusal then ends with that producer writing `.winresult`
+and a `finished` receipt; `pod down` retires the generation once the kernel
+reports that exact process gone, and `pod up` admits a fresh generation. A
+producer still provisioning (`preparing`) is waited for, never killed; one that
+has already published its `finished` receipt is ended if it is still exiting,
+because that receipt was its last write. The task wrapper writes no sidecar, so no
+write can land after the producer is proven gone. Two shapes still need the
+manual procedure: a `reserved` record nobody claimed (the task never launched
+Python, or was killed during interpreter start-up), and a `preparing` record
+whose producer died after creating the HOME without its receipt, because a
+child it spawned may still be writing there. Deleting only `.winrun` is neither
+safe retirement nor sufficient to clear the other evidence. By contrast, a
+persisted `cancelled` start has never attempted `/Run`: fix the reported cleanup
+error and repeat `pod up` to finish its generation-checked cleanup and retry.
 
 For an uncontained or otherwise unprovable run, use this conservative manual
 procedure. It deletes the disposable pod's data, not the checkout. Save anything
